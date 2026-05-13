@@ -13,7 +13,7 @@
   "author": "Aaron Small",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/aasmall/pi-copy-code.git"
+    "url": "git+https://github.com/penumbral-labs/pi-copy-code.git"
   },
   "files": [
     "extensions",

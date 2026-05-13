@@ -6,7 +6,7 @@ A [pi](https://pi.dev/) package that makes assistant code blocks easier to copy 
 
 - Adds `/copy-code`.
 - Adds `ctrl+alt+c` as the same action.
-- Copies code from the latest assistant message without TUI/container padding.
+- Copies the raw fenced code from the latest assistant message, bypassing rendered TUI/container padding.
 - If the latest assistant message has one fenced code block, it copies immediately.
 - If it has multiple fenced code blocks, it opens a two-pane overlay picker:
   - left pane: `All code blocks` plus each block with language, line count, and preview text
@@ -18,7 +18,7 @@ A [pi](https://pi.dev/) package that makes assistant code blocks easier to copy 
 From this repository:
 
 ```bash
-pi install /home/aaron/src/github.com/aasmall/pi-copy-code
+pi install /home/aaron/src/github.com/penumbral-labs/pi-copy-code
 ```
 
 Then reload pi:
@@ -30,7 +30,7 @@ Then reload pi:
 For a one-off run without installing:
 
 ```bash
-pi -e /home/aaron/src/github.com/aasmall/pi-copy-code
+pi -e /home/aaron/src/github.com/penumbral-labs/pi-copy-code
 ```
 
 ## Avoid duplicate commands during development
@@ -60,21 +60,6 @@ Hidden backwards-compatible forms are still accepted but not advertised:
 /copy-code all
 /copy-code 2
 ```
-
-## Experimental: zero-padding mouse selection
-
-Terminal mouse selection copies rendered screen cells, so pi cannot post-process mouse-selected text. This package includes
-an **experimental opt-in render patch** that removes the outer one-cell Markdown padding for fenced code-block lines before
-they reach the terminal.
-
-It is disabled by default because it monkey-patches pi's Markdown renderer. Enable only if you want normal mouse drag-copy
-to copy code blocks without the extra leading cell:
-
-```bash
-PI_COPY_CODE_ZERO_PADDING=1 pi
-```
-
-The semantic `/copy-code` command does not need this patch.
 
 ## Package shape
 
