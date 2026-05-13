@@ -32,7 +32,7 @@ type CopyAction = "copy" | "edit";
 type PickerResult = {
   action: CopyAction;
   code: string;
-} | null;
+} | undefined;
 
 function latestAssistantMarkdown(ctx: AnyContext): string | undefined {
   const sessionManager = ctx.sessionManager as any;
@@ -263,7 +263,7 @@ class CodeBlockPickerComponent {
     } else if (data === "e") {
       this.done({ action: "edit", code: this.items[this.selected].code });
     } else if (matchesKey(data, "escape") || data === "q") {
-      this.done(null);
+      this.done(undefined);
     }
   }
 
@@ -272,7 +272,7 @@ class CodeBlockPickerComponent {
 
 async function chooseCopyAction(
   blocks: CodeBlock[],
-  ctx: ExtensionCommandContext,
+  ctx: AnyContext,
   enterAction: CopyAction,
 ): Promise<PickerResult> {
   if (blocks.length === 1) {
@@ -286,6 +286,49 @@ async function chooseCopyAction(
       new CodeBlockPickerComponent(blocks, theme, mdTheme, tui, enterAction, done),
     { overlay: true },
   );
+}
+
+export function splitEditorCommand(command: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | undefined;
+
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i];
+
+    if (quote) {
+      if (char === quote) {
+        quote = undefined;
+      } else if (
+        quote === '"' &&
+        char === "\\" &&
+        i + 1 < command.length &&
+        ['\\', '"', "$", "`"].includes(command[i + 1])
+      ) {
+        current += command[++i];
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === "'" || char === '"') {
+      quote = char;
+    } else if (/\s/.test(char)) {
+      if (current) {
+        parts.push(current);
+        current = "";
+      }
+    } else {
+      current += char;
+    }
+  }
+
+  if (current) {
+    parts.push(current);
+  }
+
+  return parts;
 }
 
 class ExternalEditorComponent {
@@ -329,7 +372,12 @@ class ExternalEditorComponent {
       fs.writeFileSync(tmpFile, this.code, "utf-8");
       this.tui.stop();
 
-      const [editor, ...editorArgs] = editorCommand.split(" ");
+      const [editor, ...editorArgs] = splitEditorCommand(editorCommand);
+      if (!editor) {
+        this.done(undefined);
+        return;
+      }
+
       const result = spawnSync(editor, [...editorArgs, tmpFile], {
         stdio: "inherit",
         shell: process.platform === "win32",
@@ -341,9 +389,7 @@ class ExternalEditorComponent {
     } finally {
       try {
         fs.unlinkSync(tmpFile);
-      } catch {
-        // Best-effort cleanup only.
-      }
+      } catch {}
 
       this.tui.start();
       this.tui.requestRender(true);
@@ -355,7 +401,7 @@ class ExternalEditorComponent {
 
 async function editCodeBeforeCopy(
   code: string,
-  ctx: ExtensionCommandContext,
+  ctx: AnyContext,
 ): Promise<string | undefined> {
   if (!(process.env.VISUAL || process.env.EDITOR)) {
     ctx.ui.notify("No external editor configured. Set $VISUAL or $EDITOR.", "warning");
@@ -389,28 +435,15 @@ export default function copyCodeExtension(pi: ExtensionAPI) {
     const arg = args.trim().toLowerCase();
     let text: string | undefined;
 
-    // Backward-compatible hidden forms. The advertised UX is just /copy-code.
-    if (arg === "all") {
-      text = blocks.map((block) => block.code).join("\n\n");
-    } else if (/^\d+$/.test(arg)) {
-      text = blocks[Number(arg) - 1]?.code;
-      if (text === undefined) {
-        ctx.ui.notify(`No code block #${arg}`, "warning");
-        return;
-      }
-    } else if (!arg || arg === "last" || arg === "select" || arg === "choose" || arg === "edit") {
-      const result = await chooseCopyAction(
-        blocks,
-        ctx as ExtensionCommandContext,
-        arg === "edit" ? "edit" : "copy",
-      );
-      if (result === null) {
+    if (!arg || arg === "edit") {
+      const result = await chooseCopyAction(blocks, ctx, arg === "edit" ? "edit" : "copy");
+      if (result === undefined) {
         ctx.ui.notify("Copy cancelled", "info");
         return;
       }
 
       if (result.action === "edit") {
-        const edited = await editCodeBeforeCopy(result.code, ctx as ExtensionCommandContext);
+        const edited = await editCodeBeforeCopy(result.code, ctx);
         if (edited === undefined) {
           ctx.ui.notify("Copy cancelled", "info");
           return;
@@ -420,7 +453,7 @@ export default function copyCodeExtension(pi: ExtensionAPI) {
         text = result.code;
       }
     } else {
-      ctx.ui.notify("Usage: /copy-code", "warning");
+      ctx.ui.notify("Usage: /copy-code [edit]", "warning");
       return;
     }
 

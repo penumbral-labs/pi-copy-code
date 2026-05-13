@@ -25,6 +25,12 @@ there is more than one block, it opens a small two-pane picker with a live previ
 
 ## Install
 
+From npm:
+
+```bash
+pi install npm:pi-copy-code
+```
+
 From GitHub:
 
 ```bash
@@ -45,6 +51,12 @@ Then reload pi:
 ```
 
 For a one-off run without installing:
+
+```bash
+pi -e npm:pi-copy-code
+```
+
+or, from GitHub:
 
 ```bash
 pi -e git:github.com/penumbral-labs/pi-copy-code
@@ -116,18 +128,6 @@ print("hello")
 ````
 
 Indented markdown code blocks are not currently extracted.
-
-## Migrating from a manual extension
-
-If you previously tested a manually installed prototype under `~/.pi/agent/extensions`, remove or move it before using the
-package. Pi auto-loads `~/.pi/agent/extensions/*/index.ts`, so even a directory named `.bak` can still register commands.
-
-Example:
-
-```bash
-mkdir -p ~/.pi/agent/extensions-disabled
-mv ~/.pi/agent/extensions/copy-code ~/.pi/agent/extensions-disabled/copy-code
-```
 
 ## Package shape
 

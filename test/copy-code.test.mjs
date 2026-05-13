@@ -53,6 +53,21 @@ test("createCopyChoices adds an All option for multiple blocks", () => {
   assert.match(choices[2].label, /^2\. python/);
 });
 
+test("splitEditorCommand preserves quoted editor commands", () => {
+  assert.deepEqual(extension.splitEditorCommand('"/Applications/MacVim.app/Contents/bin/mvim" --wait'), [
+    "/Applications/MacVim.app/Contents/bin/mvim",
+    "--wait",
+  ]);
+  assert.deepEqual(extension.splitEditorCommand('nvim --cmd "set background=dark"'), [
+    "nvim",
+    "--cmd",
+    "set background=dark",
+  ]);
+  assert.deepEqual(extension.splitEditorCommand('"C:\\Program Files\\Neovim\\bin\\nvim.exe"'), [
+    "C:\\Program Files\\Neovim\\bin\\nvim.exe",
+  ]);
+});
+
 test("extension registers /copy-code and ctrl+alt+c", () => {
   const registered = { commands: [], shortcuts: [] };
 
