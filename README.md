@@ -1,22 +1,37 @@
 # pi-copy-code
 
-A [pi](https://pi.dev/) package that makes assistant code blocks easier to copy from the TUI.
+A [pi](https://pi.dev/) package for copying fenced code blocks from assistant messages without terminal selection
+padding.
 
-## What it does
+`pi-copy-code` adds one command and one shortcut:
 
-- Adds `/copy-code`.
-- Adds `ctrl+alt+c` as the same action.
-- Copies the raw fenced code from the latest assistant message, bypassing rendered TUI/container padding.
-- Supports editing a selected block before copying.
-- If the latest assistant message has one fenced code block, it copies immediately.
-- If it has multiple fenced code blocks, it opens a two-pane overlay picker:
-  - left pane: `All code blocks` plus each block with language, line count, and preview text
-  - right pane: live syntax-highlighted preview of the selected block
-  - keys: `↑`/`↓` or `j`/`k` to move, `enter` for the default action, `e` to edit, `esc`/`q` to cancel
+- `/copy-code`
+- `ctrl+alt+c`
 
-## Install locally
+It reads the latest assistant message, extracts fenced code blocks, and copies the raw code text to your clipboard. If
+there is more than one block, it opens a small two-pane picker with a live preview.
 
-From this repository:
+## Features
+
+- Copy raw fenced code instead of rendered terminal cells.
+- Preserve whitespace-sensitive YAML, shell, Python, and heredoc indentation.
+- Copy one block immediately when there is only one block.
+- Choose between multiple blocks with a preview picker.
+- Copy all blocks at once from the picker.
+- Edit a selected block in your external editor before copying.
+- Clipboard fallback order:
+  - native clipboard command when available (`pbcopy`, `wl-copy`, `xclip`, `xsel`, `clip.exe`)
+  - OSC 52 terminal clipboard sequence when native clipboard commands are unavailable
+
+## Install
+
+From GitHub:
+
+```bash
+pi install git:github.com/penumbral-labs/pi-copy-code
+```
+
+Or from a local checkout:
 
 ```bash
 cd /path/to/pi-copy-code
@@ -32,19 +47,18 @@ Then reload pi:
 For a one-off run without installing:
 
 ```bash
+pi -e git:github.com/penumbral-labs/pi-copy-code
+```
+
+or, from a local checkout:
+
+```bash
 pi -e "$(pwd)"
 ```
 
-## Avoid duplicate commands during development
-
-If you still have the prototype global extension at `~/.pi/agent/extensions/copy-code`, pi may register two `/copy-code`
-commands. Disable or move the prototype before installing this package:
-
-```bash
-mv ~/.pi/agent/extensions/copy-code ~/.pi/agent/extensions/copy-code.bak
-```
-
 ## Usage
+
+Copy code from the latest assistant message:
 
 ```text
 /copy-code
@@ -56,19 +70,63 @@ or press:
 ctrl+alt+c
 ```
 
-Use edit mode when you want `enter` to edit before copying:
+Edit before copying:
 
 ```text
 /copy-code edit
 ```
 
-Edit mode opens your external editor directly using `$VISUAL` or `$EDITOR`.
+When multiple blocks are available, the picker opens:
 
-Hidden backwards-compatible forms are still accepted but not advertised:
+- `↑` / `↓` or `j` / `k` — move selection
+- `enter` — run the default action
+  - `/copy-code`: copy
+  - `/copy-code edit`: edit, then copy
+- `e` — edit selected block, then copy
+- `esc` or `q` — cancel
 
-```text
-/copy-code all
-/copy-code 2
+The first picker item is `All code blocks`, which copies all blocks separated by blank lines.
+
+## External editor setup
+
+Edit mode opens your external editor directly using `$VISUAL`, then `$EDITOR`.
+
+For NeoVim:
+
+```bash
+export VISUAL=nvim
+# or
+export EDITOR=nvim
+```
+
+If neither variable is set, `/copy-code edit` shows a warning and cancels.
+
+## What counts as a code block?
+
+`pi-copy-code` extracts fenced markdown blocks from the latest assistant message:
+
+````markdown
+```bash
+echo hello
+```
+
+~~~python
+print("hello")
+~~~
+````
+
+Indented markdown code blocks are not currently extracted.
+
+## Migrating from a manual extension
+
+If you previously tested a manually installed prototype under `~/.pi/agent/extensions`, remove or move it before using the
+package. Pi auto-loads `~/.pi/agent/extensions/*/index.ts`, so even a directory named `.bak` can still register commands.
+
+Example:
+
+```bash
+mkdir -p ~/.pi/agent/extensions-disabled
+mv ~/.pi/agent/extensions/copy-code ~/.pi/agent/extensions-disabled/copy-code
 ```
 
 ## Package shape
@@ -85,6 +143,20 @@ The package uses pi's package manifest in `package.json`:
 ```
 
 Core pi packages are peer dependencies, per pi package guidance.
+
+## Development
+
+Run tests:
+
+```bash
+npm test
+```
+
+Check publish contents:
+
+```bash
+npm pack --dry-run
+```
 
 ## Test fixture
 

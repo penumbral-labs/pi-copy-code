@@ -15,6 +15,13 @@
     "type": "git",
     "url": "git+https://github.com/penumbral-labs/pi-copy-code.git"
   },
+  "homepage": "https://github.com/penumbral-labs/pi-copy-code#readme",
+  "bugs": {
+    "url": "https://github.com/penumbral-labs/pi-copy-code/issues"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  },
   "files": [
     "extensions",
     "README.md",
