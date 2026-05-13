@@ -18,7 +18,8 @@ A [pi](https://pi.dev/) package that makes assistant code blocks easier to copy 
 From this repository:
 
 ```bash
-pi install /home/aaron/src/github.com/penumbral-labs/pi-copy-code
+cd /path/to/pi-copy-code
+pi install "$(pwd)"
 ```
 
 Then reload pi:
@@ -30,7 +31,7 @@ Then reload pi:
 For a one-off run without installing:
 
 ```bash
-pi -e /home/aaron/src/github.com/penumbral-labs/pi-copy-code
+pi -e "$(pwd)"
 ```
 
 ## Avoid duplicate commands during development

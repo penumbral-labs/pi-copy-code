@@ -2,10 +2,11 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
+  Theme,
 } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Markdown, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { TUI } from "@earendil-works/pi-tui";
+import type { MarkdownTheme, TUI } from "@earendil-works/pi-tui";
 import { Buffer } from "node:buffer";
 import { spawnSync } from "node:child_process";
 
@@ -73,8 +74,8 @@ export function extractCodeBlocks(markdown: string): CodeBlock[] {
       continue;
     }
 
-    const escapedFence = fenceChar === "`" ? "`" : "~";
-    const close = new RegExp(`^[ \\t]*${escapedFence}{${fenceLength},}[ \\t]*$`);
+    const fenceLiteral = fenceChar === "`" ? "`" : "~";
+    const close = new RegExp(`^[ \\t]*${fenceLiteral}{${fenceLength},}[ \\t]*$`);
     if (close.test(line)) {
       blocks.push({ index: blocks.length + 1, lang, code: buffer.join("\n") });
       fenceChar = undefined;
@@ -143,12 +144,17 @@ function copyToClipboard(text: string): string {
     return "OSC 52";
   }
 
-  throw new Error("No clipboard command found and OSC 52 payload is too large");
+  throw new Error("Clipboard unavailable: no native command found and text is too large for terminal copy");
+}
+
+function lineCount(text: string): number {
+  return text === "" ? 0 : text.split("\n").length;
 }
 
 function describeBlock(block: CodeBlock): string {
-  const first = block.code.split("\n").find((line) => line.trim())?.trim().slice(0, 60) || "(blank)";
-  const lines = block.code === "" ? 0 : block.code.split("\n").length;
+  const codeLines = block.code.split("\n");
+  const first = codeLines.find((line) => line.trim())?.trim().slice(0, 60) || "(blank)";
+  const lines = block.code === "" ? 0 : codeLines.length;
   return `${block.index}. ${block.lang || "text"} (${lines} line${lines === 1 ? "" : "s"}) ${first}`;
 }
 
@@ -169,8 +175,8 @@ class CodeBlockPickerComponent {
 
   constructor(
     blocks: CodeBlock[],
-    private theme: any,
-    private mdTheme: any,
+    private theme: Theme,
+    private mdTheme: MarkdownTheme,
     private tui: TUI,
     private done: (result: string | null) => void,
   ) {
@@ -225,7 +231,7 @@ class CodeBlockPickerComponent {
         border("┘"),
     );
 
-    const hint = " ↑↓ navigate • enter copy • esc cancel ";
+    const hint = " ↑↓/j/k navigate • enter copy • esc/q cancel ";
     const hintWidth = visibleWidth(hint);
     const pad = Math.max(0, width - hintWidth);
     lines.push(this.theme.fg("dim", " ".repeat(Math.floor(pad / 2)) + hint));
@@ -312,7 +318,7 @@ export default function copyCodeExtension(pi: ExtensionAPI) {
 
     try {
       const via = copyToClipboard(text);
-      const lines = text === "" ? 0 : text.split("\n").length;
+      const lines = lineCount(text);
       ctx.ui.notify(`Copied ${lines} line${lines === 1 ? "" : "s"} via ${via}`, "info");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
