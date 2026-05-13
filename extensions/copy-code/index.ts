@@ -9,6 +9,9 @@ import { Markdown, matchesKey, truncateToWidth, visibleWidth } from "@earendil-w
 import type { MarkdownTheme, TUI } from "@earendil-works/pi-tui";
 import { Buffer } from "node:buffer";
 import { spawnSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 type AnyContext = ExtensionCommandContext | ExtensionContext;
 
@@ -240,7 +243,7 @@ class CodeBlockPickerComponent {
     );
 
     const enterLabel = this.enterAction === "edit" ? "enter edit" : "enter copy";
-    const hint = ` ↑↓/j/k navigate • ${enterLabel} • e edit • c copy • esc/q cancel `;
+    const hint = ` ↑↓/j/k navigate • ${enterLabel} • e edit • esc/q cancel `;
     const hintWidth = visibleWidth(hint);
     const pad = Math.max(0, width - hintWidth);
     lines.push(this.theme.fg("dim", " ".repeat(Math.floor(pad / 2)) + hint));
@@ -259,8 +262,6 @@ class CodeBlockPickerComponent {
       this.done({ action: this.enterAction, code: this.items[this.selected].code });
     } else if (data === "e") {
       this.done({ action: "edit", code: this.items[this.selected].code });
-    } else if (data === "c") {
-      this.done({ action: "copy", code: this.items[this.selected].code });
     } else if (matchesKey(data, "escape") || data === "q") {
       this.done(null);
     }
@@ -287,11 +288,84 @@ async function chooseCopyAction(
   );
 }
 
+class ExternalEditorComponent {
+  private started = false;
+
+  constructor(
+    private code: string,
+    private tui: TUI,
+    private done: (result: string | undefined) => void,
+  ) {}
+
+  render(width: number): string[] {
+    if (!this.started) {
+      this.started = true;
+      setTimeout(() => this.openExternalEditor(), 0);
+    }
+
+    return [truncateToWidth("Opening external editor…", width, undefined, true)];
+  }
+
+  handleInput(data: string): void {
+    if (matchesKey(data, "escape") || data === "q") {
+      this.done(undefined);
+    }
+  }
+
+  invalidate(): void {}
+
+  private openExternalEditor(): void {
+    const editorCommand = process.env.VISUAL || process.env.EDITOR;
+    if (!editorCommand) {
+      this.done(undefined);
+      return;
+    }
+
+    const tmpFile = path.join(os.tmpdir(), `pi-copy-code-${Date.now()}.txt`);
+
+    let edited: string | undefined;
+
+    try {
+      fs.writeFileSync(tmpFile, this.code, "utf-8");
+      this.tui.stop();
+
+      const [editor, ...editorArgs] = editorCommand.split(" ");
+      const result = spawnSync(editor, [...editorArgs, tmpFile], {
+        stdio: "inherit",
+        shell: process.platform === "win32",
+      });
+
+      if (result.status === 0) {
+        edited = fs.readFileSync(tmpFile, "utf-8").replace(/\n$/, "");
+      }
+    } finally {
+      try {
+        fs.unlinkSync(tmpFile);
+      } catch {
+        // Best-effort cleanup only.
+      }
+
+      this.tui.start();
+      this.tui.requestRender(true);
+    }
+
+    this.done(edited);
+  }
+}
+
 async function editCodeBeforeCopy(
   code: string,
   ctx: ExtensionCommandContext,
 ): Promise<string | undefined> {
-  return await ctx.ui.editor("Edit code before copy", code);
+  if (!(process.env.VISUAL || process.env.EDITOR)) {
+    ctx.ui.notify("No external editor configured. Set $VISUAL or $EDITOR.", "warning");
+    return undefined;
+  }
+
+  return await ctx.ui.custom<string | undefined>(
+    (tui, _theme, _keybindings, done) => new ExternalEditorComponent(code, tui, done),
+    { overlay: true },
+  );
 }
 
 export default function copyCodeExtension(pi: ExtensionAPI) {

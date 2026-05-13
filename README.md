@@ -12,7 +12,7 @@ A [pi](https://pi.dev/) package that makes assistant code blocks easier to copy 
 - If it has multiple fenced code blocks, it opens a two-pane overlay picker:
   - left pane: `All code blocks` plus each block with language, line count, and preview text
   - right pane: live syntax-highlighted preview of the selected block
-  - keys: `↑`/`↓` or `j`/`k` to move, `enter` for the default action, `e` to edit, `c` to copy, `esc`/`q` to cancel
+  - keys: `↑`/`↓` or `j`/`k` to move, `enter` for the default action, `e` to edit, `esc`/`q` to cancel
 
 ## Install locally
 
@@ -62,7 +62,7 @@ Use edit mode when you want `enter` to edit before copying:
 /copy-code edit
 ```
 
-The edit dialog supports pi's external editor keybinding (`ctrl+g` by default) when `$VISUAL` or `$EDITOR` is set.
+Edit mode opens your external editor directly using `$VISUAL` or `$EDITOR`.
 
 Hidden backwards-compatible forms are still accepted but not advertised:
 
