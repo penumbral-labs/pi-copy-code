@@ -1,0 +1,40 @@
+{
+  "name": "pi-copy-code",
+  "version": "0.1.0",
+  "description": "A pi extension for ergonomic copying of assistant code blocks.",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "clipboard",
+    "code-blocks"
+  ],
+  "license": "MIT",
+  "author": "Aaron Small",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aasmall/pi-copy-code.git"
+  },
+  "files": [
+    "extensions",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/copy-code/index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.74.0",
+    "@earendil-works/pi-tui": "^0.74.0",
+    "jiti": "^2.7.0"
+  }
+}
