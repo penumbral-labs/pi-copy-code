@@ -24,6 +24,13 @@ export type CopyChoice = {
   lang: string;
 };
 
+type CopyAction = "copy" | "edit";
+
+type PickerResult = {
+  action: CopyAction;
+  code: string;
+} | null;
+
 function latestAssistantMarkdown(ctx: AnyContext): string | undefined {
   const sessionManager = ctx.sessionManager as any;
   const entries =
@@ -178,7 +185,8 @@ class CodeBlockPickerComponent {
     private theme: Theme,
     private mdTheme: MarkdownTheme,
     private tui: TUI,
-    private done: (result: string | null) => void,
+    private enterAction: CopyAction,
+    private done: (result: PickerResult) => void,
   ) {
     this.items = createCopyChoices(blocks);
   }
@@ -231,7 +239,8 @@ class CodeBlockPickerComponent {
         border("┘"),
     );
 
-    const hint = " ↑↓/j/k navigate • enter copy • esc/q cancel ";
+    const enterLabel = this.enterAction === "edit" ? "enter edit" : "enter copy";
+    const hint = ` ↑↓/j/k navigate • ${enterLabel} • e edit • c copy • esc/q cancel `;
     const hintWidth = visibleWidth(hint);
     const pad = Math.max(0, width - hintWidth);
     lines.push(this.theme.fg("dim", " ".repeat(Math.floor(pad / 2)) + hint));
@@ -247,7 +256,11 @@ class CodeBlockPickerComponent {
       this.selected = Math.min(this.items.length - 1, this.selected + 1);
       this.tui.requestRender();
     } else if (matchesKey(data, "enter")) {
-      this.done(this.items[this.selected].code);
+      this.done({ action: this.enterAction, code: this.items[this.selected].code });
+    } else if (data === "e") {
+      this.done({ action: "edit", code: this.items[this.selected].code });
+    } else if (data === "c") {
+      this.done({ action: "copy", code: this.items[this.selected].code });
     } else if (matchesKey(data, "escape") || data === "q") {
       this.done(null);
     }
@@ -256,23 +269,29 @@ class CodeBlockPickerComponent {
   invalidate(): void {}
 }
 
-async function chooseCopyText(
+async function chooseCopyAction(
   blocks: CodeBlock[],
   ctx: ExtensionCommandContext,
-): Promise<string | undefined> {
+  enterAction: CopyAction,
+): Promise<PickerResult> {
   if (blocks.length === 1) {
-    return blocks[0].code;
+    return { action: enterAction, code: blocks[0].code };
   }
 
   const mdTheme = { ...getMarkdownTheme(), codeBlockIndent: "" };
 
-  const picked = await ctx.ui.custom<string | null>(
+  return await ctx.ui.custom<PickerResult>(
     (tui, theme, _keybindings, done) =>
-      new CodeBlockPickerComponent(blocks, theme, mdTheme, tui, done),
+      new CodeBlockPickerComponent(blocks, theme, mdTheme, tui, enterAction, done),
     { overlay: true },
   );
+}
 
-  return picked ?? undefined;
+async function editCodeBeforeCopy(
+  code: string,
+  ctx: ExtensionCommandContext,
+): Promise<string | undefined> {
+  return await ctx.ui.editor("Edit code before copy", code);
 }
 
 export default function copyCodeExtension(pi: ExtensionAPI) {
@@ -305,11 +324,26 @@ export default function copyCodeExtension(pi: ExtensionAPI) {
         ctx.ui.notify(`No code block #${arg}`, "warning");
         return;
       }
-    } else if (!arg || arg === "last" || arg === "select" || arg === "choose") {
-      text = await chooseCopyText(blocks, ctx as ExtensionCommandContext);
-      if (text === undefined) {
+    } else if (!arg || arg === "last" || arg === "select" || arg === "choose" || arg === "edit") {
+      const result = await chooseCopyAction(
+        blocks,
+        ctx as ExtensionCommandContext,
+        arg === "edit" ? "edit" : "copy",
+      );
+      if (result === null) {
         ctx.ui.notify("Copy cancelled", "info");
         return;
+      }
+
+      if (result.action === "edit") {
+        const edited = await editCodeBeforeCopy(result.code, ctx as ExtensionCommandContext);
+        if (edited === undefined) {
+          ctx.ui.notify("Copy cancelled", "info");
+          return;
+        }
+        text = edited;
+      } else {
+        text = result.code;
       }
     } else {
       ctx.ui.notify("Usage: /copy-code", "warning");
