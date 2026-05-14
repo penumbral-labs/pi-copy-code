@@ -28,7 +28,7 @@ there is more than one block, it opens a small two-pane picker with a live previ
 From npm:
 
 ```bash
-pi install npm:pi-copy-code
+pi install npm:@penumbral-labs/pi-copy-code
 ```
 
 From GitHub:
@@ -53,7 +53,7 @@ Then reload pi:
 For a one-off run without installing:
 
 ```bash
-pi -e npm:pi-copy-code
+pi -e npm:@penumbral-labs/pi-copy-code
 ```
 
 or, from GitHub:
