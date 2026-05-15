@@ -1,6 +1,6 @@
 {
   "name": "@penumbral-labs/pi-copy-code",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A pi extension for ergonomic copying of assistant code blocks.",
   "type": "module",
   "keywords": [
