@@ -3,10 +3,11 @@
 A [pi](https://pi.dev/) package for copying fenced code blocks from assistant messages without terminal selection
 padding.
 
-`pi-copy-code` adds one command and one shortcut:
+`pi-copy-code` adds one command and two shortcuts:
 
 - `/copy-code`
 - `ctrl+alt+c`
+- `ctrl+super+c` (`Ctrl+Meta+C` / `Ctrl+Command+C`)
 
 It reads recent assistant messages, extracts fenced code blocks, and copies the raw code text to your clipboard. If
 there is more than one block (or more than one recent message with code), it opens a small two-pane picker with a live
@@ -78,11 +79,15 @@ Copy code from the latest assistant message:
 /copy-code
 ```
 
-or press:
+or press either shortcut:
 
 ```text
 ctrl+alt+c
+ctrl+super+c
 ```
+
+Pi calls the Meta/Command modifier `super`. Super-modified shortcuts require a terminal that reports the modifier
+separately, such as one using the Kitty keyboard protocol.
 
 Edit before copying:
 

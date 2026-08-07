@@ -47,8 +47,10 @@ type PickerResult = {
 
 type TerminalInputResult = { consume?: boolean; data?: string } | undefined;
 
+const COPY_CODE_SHORTCUTS = ["ctrl+alt+c", "ctrl+super+c"] as const;
+
 export function handleCopyCodeTerminalInput(data: string, runCopyCode: () => void): TerminalInputResult {
-  if (!matchesKey(data, "ctrl+alt+c")) {
+  if (!COPY_CODE_SHORTCUTS.some((shortcut) => matchesKey(data, shortcut))) {
     return undefined;
   }
 
@@ -868,10 +870,12 @@ export default function copyCodeExtension(pi: ExtensionAPI) {
     handler: runGuarded,
   });
 
-  pi.registerShortcut("ctrl+alt+c", {
-    description: "Copy code from recent assistant messages",
-    handler: (ctx) => runGuarded("", ctx),
-  });
+  for (const shortcut of COPY_CODE_SHORTCUTS) {
+    pi.registerShortcut(shortcut, {
+      description: "Copy code from recent assistant messages",
+      handler: (ctx) => runGuarded("", ctx),
+    });
+  }
 
   pi.on("session_start", (_event, ctx) => {
     clearTerminalInputListener();

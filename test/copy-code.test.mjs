@@ -215,7 +215,7 @@ test("splitEditorCommand preserves quoted editor commands", () => {
   ]);
 });
 
-test("extension registers /copy-code and ctrl+alt+c", () => {
+test("extension registers /copy-code with ctrl+alt+c and ctrl+super+c", () => {
   const registered = { commands: [], shortcuts: [], handlers: new Map() };
 
   extension.default({
@@ -231,12 +231,15 @@ test("extension registers /copy-code and ctrl+alt+c", () => {
   });
 
   assert.equal(registered.commands[0].name, "copy-code");
-  assert.equal(registered.shortcuts[0].shortcut, "ctrl+alt+c");
+  assert.deepEqual(
+    registered.shortcuts.map(({ shortcut }) => shortcut),
+    ["ctrl+alt+c", "ctrl+super+c"],
+  );
   assert.equal(typeof registered.handlers.get("session_start"), "function");
   assert.equal(typeof registered.handlers.get("session_shutdown"), "function");
 });
 
-test("session_start registers a terminal listener for ctrl+alt+c", () => {
+test("session_start registers a terminal listener for copy-code shortcuts", () => {
   const { handlers, listeners, cleanupCalls } = registerForTerminalInputTests();
   const ctx = createTerminalInputContext({ listeners, cleanupCalls });
 
@@ -246,17 +249,22 @@ test("session_start registers a terminal listener for ctrl+alt+c", () => {
   assert.equal(cleanupCalls.length, 0);
 });
 
-test("terminal listener consumes ctrl+alt+c and runs copy-code once", () => {
-  const { handlers, listeners, cleanupCalls } = registerForTerminalInputTests();
-  const notifications = [];
-  const ctx = createTerminalInputContext({ listeners, cleanupCalls, notifications });
+for (const [shortcut, input] of [
+  ["ctrl+alt+c", "\x1b\x03"],
+  ["ctrl+super+c", "\x1b[99;13u"],
+]) {
+  test(`terminal listener consumes ${shortcut} and runs copy-code once`, () => {
+    const { handlers, listeners, cleanupCalls } = registerForTerminalInputTests();
+    const notifications = [];
+    const ctx = createTerminalInputContext({ listeners, cleanupCalls, notifications });
 
-  handlers.get("session_start")({}, ctx);
-  const result = listeners[0]("\x1b\x03");
+    handlers.get("session_start")({}, ctx);
+    const result = listeners[0](input);
 
-  assert.deepEqual(result, { consume: true });
-  assert.deepEqual(notifications, [{ message: "No code blocks found in recent assistant messages", type: "warning" }]);
-});
+    assert.deepEqual(result, { consume: true });
+    assert.deepEqual(notifications, [{ message: "No code blocks found in recent assistant messages", type: "warning" }]);
+  });
+}
 
 test("terminal listener consumes matching presses while copy-code is in flight without starting another run", async () => {
   const { handlers, listeners, cleanupCalls } = registerForTerminalInputTests();
@@ -278,7 +286,7 @@ test("terminal listener consumes matching presses while copy-code is in flight w
 
   handlers.get("session_start")({}, ctx);
   const first = listeners[0]("\x1b\x03");
-  const second = listeners[0]("\x1b\x03");
+  const second = listeners[0]("\x1b[99;13u");
 
   assert.deepEqual(first, { consume: true });
   assert.deepEqual(second, { consume: true });
@@ -375,7 +383,7 @@ test("terminal listener passes nonmatching input through", () => {
   assert.deepEqual(notifications, []);
 });
 
-test("terminal listener preserves ctrl+alt+c release and repeat behavior", () => {
+test("terminal listener preserves release and repeat behavior for both shortcuts", () => {
   const { handlers, listeners, cleanupCalls } = registerForTerminalInputTests();
   const notifications = [];
   const ctx = createTerminalInputContext({
@@ -389,11 +397,15 @@ test("terminal listener preserves ctrl+alt+c release and repeat behavior", () =>
   });
 
   handlers.get("session_start")({}, ctx);
-  const repeat = listeners[0]("\x1b[99;7:2u");
-  const release = listeners[0]("\x1b[99;7:3u");
+  const altRepeat = listeners[0]("\x1b[99;7:2u");
+  const altRelease = listeners[0]("\x1b[99;7:3u");
+  const superRepeat = listeners[0]("\x1b[99;13:2u");
+  const superRelease = listeners[0]("\x1b[99;13:3u");
 
-  assert.deepEqual(repeat, { consume: true });
-  assert.deepEqual(release, { consume: true });
+  assert.deepEqual(altRepeat, { consume: true });
+  assert.deepEqual(altRelease, { consume: true });
+  assert.deepEqual(superRepeat, { consume: true });
+  assert.deepEqual(superRelease, { consume: true });
   assert.deepEqual(notifications, []);
 });
 
