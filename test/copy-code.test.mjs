@@ -215,7 +215,7 @@ test("splitEditorCommand preserves quoted editor commands", () => {
   ]);
 });
 
-test("extension registers /copy-code with ctrl+alt+c and ctrl+super+c", () => {
+test("extension registers /copy-code with native and remapped shortcuts", () => {
   const registered = { commands: [], shortcuts: [], handlers: new Map() };
 
   extension.default({
@@ -233,7 +233,7 @@ test("extension registers /copy-code with ctrl+alt+c and ctrl+super+c", () => {
   assert.equal(registered.commands[0].name, "copy-code");
   assert.deepEqual(
     registered.shortcuts.map(({ shortcut }) => shortcut),
-    ["ctrl+alt+c", "ctrl+super+c"],
+    ["ctrl+alt+c", "ctrl+super+c", "alt+c"],
   );
   assert.equal(typeof registered.handlers.get("session_start"), "function");
   assert.equal(typeof registered.handlers.get("session_shutdown"), "function");
@@ -252,6 +252,7 @@ test("session_start registers a terminal listener for copy-code shortcuts", () =
 for (const [shortcut, input] of [
   ["ctrl+alt+c", "\x1b\x03"],
   ["ctrl+super+c", "\x1b[99;13u"],
+  ["physical Ctrl+Meta+C with Ctrl/Command remapped", "\x1bc"],
 ]) {
   test(`terminal listener consumes ${shortcut} and runs copy-code once`, () => {
     const { handlers, listeners, cleanupCalls } = registerForTerminalInputTests();
@@ -286,7 +287,7 @@ test("terminal listener consumes matching presses while copy-code is in flight w
 
   handlers.get("session_start")({}, ctx);
   const first = listeners[0]("\x1b\x03");
-  const second = listeners[0]("\x1b[99;13u");
+  const second = listeners[0]("\x1bc");
 
   assert.deepEqual(first, { consume: true });
   assert.deepEqual(second, { consume: true });

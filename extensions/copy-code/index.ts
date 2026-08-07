@@ -47,7 +47,7 @@ type PickerResult = {
 
 type TerminalInputResult = { consume?: boolean; data?: string } | undefined;
 
-const COPY_CODE_SHORTCUTS = ["ctrl+alt+c", "ctrl+super+c"] as const;
+const COPY_CODE_SHORTCUTS = ["ctrl+alt+c", "ctrl+super+c", "alt+c"] as const;
 
 export function handleCopyCodeTerminalInput(data: string, runCopyCode: () => void): TerminalInputResult {
   if (!COPY_CODE_SHORTCUTS.some((shortcut) => matchesKey(data, shortcut))) {
