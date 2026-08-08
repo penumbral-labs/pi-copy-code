@@ -17,25 +17,21 @@ jobs:
   validate-release:
     name: validate-release
     runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.release-tag.outputs.tag }}
     steps:
-      - name: Check out version to validate
+      - name: Check out commit to validate
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Set up Node.js 24
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: "24"
-      - name: Set release tag
-        id: release-tag
-        env:
-          RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
-        run: echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          cache: npm
+          registry-url: https://registry.npmjs.org
       - name: Verify release tag matches package version
         env:
-          RELEASE_TAG: ${{ steps.release-tag.outputs.tag }}
+          RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
         run: |
           node <<'NODE'
           const expected = `v${require("./package.json").version}`;
@@ -44,31 +40,31 @@ jobs:
             process.exit(1);
           }
           NODE
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - name: Exercise npm publish without a registry write
+        if: github.event_name == 'workflow_dispatch'
+        run: npm publish --dry-run
 
   publish:
     name: publish
+    if: github.event_name == 'release' && !github.event.release.prerelease
     needs: validate-release
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: read
       id-token: write
     steps:
-      - name: Check out validated version
+      - name: Check out validated commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.event_name == 'release' && needs.validate-release.outputs.tag || github.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Set up Node.js 24
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: "24"
-          cache: npm
           registry-url: https://registry.npmjs.org
-      - run: npm ci --ignore-scripts
-      - run: npm run check
-      - name: Exercise npm publish without a registry write
-        if: github.event_name == 'workflow_dispatch'
-        run: npm publish --dry-run --provenance
       - name: Publish package
-        if: github.event_name == 'release' && !github.event.release.prerelease
         run: npm publish --provenance
