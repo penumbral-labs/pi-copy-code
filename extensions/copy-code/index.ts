@@ -977,12 +977,12 @@ export default function copyCodeExtension(
           ctx.ui.notify("Copy cancelled", "info");
           return;
         }
+        for (const warning of edited.warnings ?? []) {
+          ctx.ui.notify(`Copy warning: ${warning}`, "warning");
+        }
         if ("error" in edited) {
           ctx.ui.notify(`Copy failed: ${edited.error}`, "error");
           return;
-        }
-        for (const warning of edited.warnings ?? []) {
-          ctx.ui.notify(`Copy warning: ${warning}`, "warning");
         }
         text = edited.code;
       } else {

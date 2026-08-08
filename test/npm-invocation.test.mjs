@@ -49,3 +49,7 @@ test("reports an npm pack spawn error when stderr is unavailable", () => {
 test("reports npm pack stderr when the process starts but fails", () => {
   assert.equal(npmPackFailureMessage({ error: undefined, stderr: "npm error" }), "npm error");
 });
+
+test("reports a fallback when npm pack fails without stderr", () => {
+  assert.equal(npmPackFailureMessage({ error: undefined, stderr: "" }), "npm pack failed without diagnostic output");
+});

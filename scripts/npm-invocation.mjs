@@ -11,5 +11,5 @@ export function selectNpmInvocation({ platform, npmExecPath, nodeExecPath, npmRu
 }
 
 export function npmPackFailureMessage({ error, stderr }) {
-  return error?.message ?? stderr ?? "npm pack failed without diagnostic output";
+  return error?.message || stderr || "npm pack failed without diagnostic output";
 }

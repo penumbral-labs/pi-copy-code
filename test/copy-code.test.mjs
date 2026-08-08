@@ -506,6 +506,23 @@ test("external editor Ctrl+C cancels exactly once before process handoff", async
   assert.deepEqual(fs.readdirSync(root), []);
 });
 
+test("edit errors preserve cleanup warnings before reporting failure", async () => {
+  const harness = registerForClipboardTests({ nativeCommand: "pbcopy" });
+  const context = createClipboardContext(harness);
+  context.ui.custom = () =>
+    Promise.resolve({
+      error: "Editor exited with status 7",
+      warnings: ["Unable to remove editor files: cleanup denied"],
+    });
+
+  await harness.commands[0].options.handler("edit", context);
+
+  assert.deepEqual(harness.notifications, [
+    { message: "Copy warning: Unable to remove editor files: cleanup denied", type: "warning" },
+    { message: "Copy failed: Editor exited with status 7", type: "error" },
+  ]);
+});
+
 test("native and OSC 52 clipboard outcomes have accurate messages and rendering", async () => {
   const native = registerForClipboardTests({ nativeCommand: "pbcopy" });
   await native.commands[0].options.handler("", createClipboardContext(native));

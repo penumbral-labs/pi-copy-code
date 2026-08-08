@@ -17,6 +17,7 @@ assert.equal(lockfile.name, packageJson.name, "package-lock.json name must match
 assert.equal(lockfile.version, packageJson.version, "package-lock.json version must match package.json");
 assert.equal(lockfile.packages[""].version, packageJson.version, "lockfile root version must match package.json");
 assert.equal(packageJson.dependencies, undefined, "the package must not have runtime dependencies");
+assert.equal(packageJson.optionalDependencies, undefined, "the package must not have optional runtime dependencies");
 assert.equal(packageJson.scripts?.preinstall, undefined, "preinstall scripts are not allowed");
 assert.equal(packageJson.scripts?.install, undefined, "install scripts are not allowed");
 assert.equal(packageJson.scripts?.postinstall, undefined, "postinstall scripts are not allowed");
