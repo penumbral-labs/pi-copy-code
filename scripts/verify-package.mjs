@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
 const expectedFiles = [...packageJson.files, "package.json"].sort();
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
 assert.equal(lockfile.name, packageJson.name, "package-lock.json name must match package.json");
 assert.equal(lockfile.version, packageJson.version, "package-lock.json version must match package.json");
@@ -14,7 +15,7 @@ assert.equal(packageJson.scripts?.preinstall, undefined, "preinstall scripts are
 assert.equal(packageJson.scripts?.install, undefined, "install scripts are not allowed");
 assert.equal(packageJson.scripts?.postinstall, undefined, "postinstall scripts are not allowed");
 
-const pack = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+const pack = spawnSync(npmCommand, ["pack", "--dry-run", "--json", "--ignore-scripts"], {
   cwd: new URL("..", import.meta.url),
   encoding: "utf8",
 });

@@ -9,24 +9,29 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const packageJson = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 const jitiModuleUrl = import.meta.resolve("jiti");
 const temporaryRoot = mkdtempSync(path.join(tmpdir(), "pi-copy-code-smoke-"));
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
 try {
-  const packOutput = execFileSync("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", temporaryRoot], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  });
+  const packOutput = execFileSync(
+    npmCommand,
+    ["pack", "--json", "--ignore-scripts", "--pack-destination", temporaryRoot],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+    },
+  );
   const [{ filename }] = JSON.parse(packOutput);
   const installRoot = path.join(temporaryRoot, "install");
   const harnessRoot = path.join(temporaryRoot, "harness");
   mkdirSync(harnessRoot);
 
-  execFileSync("npm", ["init", "--yes"], { cwd: temporaryRoot, stdio: "ignore" });
+  execFileSync(npmCommand, ["init", "--yes"], { cwd: temporaryRoot, stdio: "ignore" });
   execFileSync(
-    "npm",
+    npmCommand,
     ["install", "--ignore-scripts", "--omit=dev", "--prefix", installRoot, path.join(temporaryRoot, filename)],
     { cwd: temporaryRoot, stdio: "pipe" },
   );
-  execFileSync("npm", ["init", "--yes"], { cwd: harnessRoot, stdio: "ignore" });
+  execFileSync(npmCommand, ["init", "--yes"], { cwd: harnessRoot, stdio: "ignore" });
 
   const installedPackageRoot = path.join(installRoot, "node_modules", ...packageJson.name.split("/"));
   const extensionPath = path.join(installedPackageRoot, packageJson.pi.extensions[0]);

@@ -57,12 +57,16 @@ Publishing is an explicit GitHub Release operation. A merge to `main` never publ
 
 Before the first real release, repository maintainers must:
 
-1. Configure the GitHub environment named `release`. Restrict deployment tags to `v*` and add required reviewers when
-   appropriate for the repository. The real publish job fails until this environment permits it.
+1. Configure the GitHub environment named `release` so it carries the intended `v*` deployment-tag restrictions and
+   required reviewers. If the environment does not yet exist, GitHub can create it when the job starts; absence alone
+   does not block publishing, so configure its protections before relying on it.
 2. Configure npm trusted publishing for this repository, exactly `.github/workflows/publish.yml`, and the `release`
    environment. Remove any legacy npm publish token after trusted publishing is confirmed. The real publish fails until
    this OIDC trust is configured.
-3. Require the `CI / check` job on `main` and require SHA-pinned Actions in repository settings.
+3. Enable GitHub private vulnerability reporting before relying on the private advisory channel or making the first
+   public release. `SECURITY.md` and the issue contact link intentionally direct reporters to that channel, but this
+   repository setting must be enabled separately.
+4. Require the `CI / check` job on `main` and require SHA-pinned Actions in repository settings.
 
 To rehearse a release, run the `Publish to npm` workflow manually. Choose the branch or tag in GitHub's **Run workflow**
 ref selector and enter the expected `vX.Y.Z` tag. The workflow checks out the selected immutable `github.sha`; the `tag`
@@ -75,9 +79,9 @@ To publish:
 1. Merge a pull request that updates `package.json`, `package-lock.json`, and `CHANGELOG.md` for the release.
 2. Confirm required CI is green and the release commit contains only the intended five-file package.
 3. Create and publish a GitHub Release whose tag is exactly `vX.Y.Z` for package version `X.Y.Z` and whose target is the
-   intended commit.
-4. The release event validates the tag and package from immutable `github.sha`, then the isolated `publish` job enters
-   the `release` environment and runs `npm publish --provenance` with OIDC.
+   intended commit. A prerelease GitHub Release runs validation but never publishes to npm.
+4. The non-prerelease event validates the tag and package from immutable `github.sha`, then the isolated `publish` job
+   enters the `release` environment and runs `npm publish --provenance` with OIDC.
 5. Verify the npm version, provenance, tarball contents, and release notes.
 
 If validation fails before npm publishes, delete or correct the GitHub Release and tag before trying again. If an

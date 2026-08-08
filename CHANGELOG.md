@@ -28,18 +28,14 @@ All notable changes to this project are documented in this file. The format is b
 - Stored editor content in a private unique temporary directory and removed it after editing.
 - Contained editor setup, file, process, and cleanup errors so the overlay completes exactly once without restarting a
   TUI that was never stopped.
-- Passed editor arguments without shell interpolation and handled Windows `.cmd` and `.bat` editor shims explicitly.
+- Passed editor arguments without `shell: true`; on Windows, spawned only `.exe` and `.com` targets directly and routed
+  extension-less names and `.cmd`/`.bat` shims through the explicit escaped `cmd.exe /d /s /c` path.
 
 ## [0.2.0] - 2026-05-15
 
 ### Added
 
-- Added edit-before-copy support using `$VISUAL` or `$EDITOR`.
-- Added public npm package metadata and trusted publishing for `@penumbral-labs/pi-copy-code`.
-
-### Changed
-
-- Removed the experimental render monkey patch and tightened editor command handling for the public package.
+- Added the npm publish workflow with trusted publishing and configured the package for public npm publishing.
 
 ## [0.1.0] - 2026-05-13
 
@@ -48,7 +44,13 @@ All notable changes to this project are documented in this file. The format is b
 - Added the initial `/copy-code` command and `Ctrl+Alt+C` shortcut.
 - Added fenced-code extraction, immediate copying for a single block, a picker for multiple blocks, native clipboard
   commands, and OSC 52 fallback.
+- Added edit-before-copy support using `$VISUAL` or `$EDITOR`.
+- Added the initial public npm package metadata for `@penumbral-labs/pi-copy-code`.
 
-[0.3.0]: https://github.com/penumbral-labs/pi-copy-code/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/penumbral-labs/pi-copy-code/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/penumbral-labs/pi-copy-code/releases/tag/v0.1.0
+### Changed
+
+- Removed the experimental render monkey patch before the initial release.
+
+[0.3.0]: https://github.com/penumbral-labs/pi-copy-code/compare/45c67ce...main
+[0.2.0]: https://github.com/penumbral-labs/pi-copy-code/compare/5c6b4e8...45c67ce
+[0.1.0]: https://github.com/penumbral-labs/pi-copy-code/tree/5c6b4e8

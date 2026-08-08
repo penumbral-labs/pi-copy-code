@@ -21,7 +21,8 @@ product shape: one command, a compact picker, and no runtime dependencies.
 - Add focused Node test-runner coverage in `test/copy-code.test.mjs` for behavior changes.
 - Shortcut changes must cover registered shortcuts, raw terminal input, modifier remapping, and repeat/release handling.
 - Verify package changes with `npm pack --dry-run` and `npm run smoke-package`.
-- Use direct executable arguments; never interpolate editor arguments into a shell command.
+- Never invoke editors with `shell: true` or generic shell interpolation. Use direct executable arguments except for the
+  reviewed Windows path, which builds an explicitly escaped `cmd.exe /d /s /c` argument vector.
 - Preserve fenced-code whitespace and keep clipboard success wording accurate to the native or best-effort OSC 52 path.
 
 ## Repository hygiene

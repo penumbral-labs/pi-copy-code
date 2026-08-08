@@ -10,7 +10,7 @@ assistant responses containing code.
 ## Prerequisites
 
 - Node.js 22.19.0 or newer
-- Pi (development and CI use Pi 0.84.1)
+- Pi (tested against Pi 0.84.1; older releases are untested)
 - A native clipboard command (`pbcopy`, `wl-copy`, `xclip`, `xsel`, or `clip.exe`) or a terminal that supports OSC 52
 
 Core Pi packages remain wildcard peer dependencies so the package uses the Pi installation that loads it. The
@@ -72,8 +72,10 @@ Edit before copying:
 /copy-code edit
 ```
 
-Edit mode opens `$VISUAL`, then `$EDITOR`, with the selected text in private temporary storage. On Windows, direct
-executables are invoked with arguments and `.cmd`/`.bat` editor shims are invoked explicitly through `cmd.exe`.
+Edit mode opens `$VISUAL`, then `$EDITOR`, with the selected text in private temporary storage; set one of these
+variables to your preferred editor command before using edit mode. On Windows, only `.exe` and `.com` targets spawn
+directly. All other values, including extension-less names and `.cmd`/`.bat` shims, use the explicitly constructed,
+escaped `cmd.exe /d /s /c` path.
 
 When the picker opens:
 
