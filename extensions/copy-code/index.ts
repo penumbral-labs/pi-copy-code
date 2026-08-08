@@ -723,7 +723,23 @@ export function splitEditorCommand(command: string): string[] {
   return parts;
 }
 
-type EditorSpawn = { command: string; args: string[] };
+type EditorSpawn = {
+  command: string;
+  args: string[];
+  options: { windowsVerbatimArguments?: boolean };
+};
+
+const CMD_META_CHARACTERS = /([()\][%!^"`<>&|;, *?])/g;
+
+function escapeCmdCommand(command: string): string {
+  return command.replace(CMD_META_CHARACTERS, "^$1");
+}
+
+function escapeCmdArgument(argument: string): string {
+  return `"${argument
+    .replace(/(?=(\\+?)?)\1"/g, '$1$1\\"')
+    .replace(/(?=(\\+?)?)\1$/, "$1$1")}"`.replace(CMD_META_CHARACTERS, "^$1");
+}
 
 export function buildEditorSpawn(
   editorCommand: string,
@@ -737,13 +753,32 @@ export function buildEditorSpawn(
   }
 
   const args = [...editorArgs, file];
-  return platform === "win32" && /\.(?:cmd|bat)$/i.test(editor)
-    ? { command: commandProcessor, args: ["/d", "/s", "/c", editor, ...args] }
-    : { command: editor, args };
+  if (platform !== "win32" || /\.(?:exe|com)$/i.test(editor)) {
+    return { command: editor, args, options: {} };
+  }
+
+  const commandString = [escapeCmdCommand(editor), ...args.map(escapeCmdArgument)].join(" ");
+  return {
+    command: commandProcessor,
+    args: ["/d", "/s", "/c", `"${commandString}"`],
+    options: { windowsVerbatimArguments: true },
+  };
 }
 
-type EditorResult = { code: string } | { error: string } | undefined;
-type ExternalEditorOptions = { editorCommand?: string; tempRoot?: string };
+export function resolveEditorCommand(
+  injected: string | undefined,
+  env: { VISUAL?: string; EDITOR?: string } = process.env,
+): string | undefined {
+  return injected !== undefined ? injected : env.VISUAL || env.EDITOR;
+}
+
+type EditorWarning = { warnings?: string[] };
+type EditorResult = ({ code: string } & EditorWarning) | ({ error: string } & EditorWarning) | undefined;
+type ExternalEditorOptions = {
+  editorCommand?: string;
+  tempRoot?: string;
+  removeTemp?: (directory: string) => void;
+};
 
 export class ExternalEditorComponent {
   private started = false;
@@ -785,7 +820,7 @@ export class ExternalEditorComponent {
       return;
     }
 
-    const editorCommand = this.options.editorCommand ?? process.env.VISUAL ?? process.env.EDITOR;
+    const editorCommand = resolveEditorCommand(this.options.editorCommand);
     if (!editorCommand) {
       this.finish({ error: "No external editor configured. Set $VISUAL or $EDITOR." });
       return;
@@ -808,12 +843,8 @@ export class ExternalEditorComponent {
       return;
     }
 
-    if (this.completed) {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-      return;
-    }
-
     let result: EditorResult;
+    const warnings: string[] = [];
     let tuiStopped = false;
     try {
       const invocation = buildEditorSpawn(editorCommand, tmpFile);
@@ -821,7 +852,10 @@ export class ExternalEditorComponent {
       this.tui.stop();
       tuiStopped = true;
 
-      const processResult = spawnSync(invocation.command, invocation.args, { stdio: "inherit" });
+      const processResult = spawnSync(invocation.command, invocation.args, {
+        stdio: "inherit",
+        ...invocation.options,
+      });
       if (processResult.error) {
         result = { error: `Unable to start editor: ${processResult.error.message}` };
       } else if (processResult.status !== 0) {
@@ -834,10 +868,13 @@ export class ExternalEditorComponent {
       result = { error: `Editor failed: ${message}` };
     } finally {
       try {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
+        const removeTemp = this.options.removeTemp ?? ((directory: string) => {
+          fs.rmSync(directory, { recursive: true, force: true });
+        });
+        removeTemp(tmpDir);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        result = { error: `Unable to remove editor files: ${message}` };
+        warnings.push(`Unable to remove editor files: ${message}`);
       }
 
       if (tuiStopped) {
@@ -846,11 +883,14 @@ export class ExternalEditorComponent {
           this.tui.requestRender(true);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          result = { error: `Unable to restore terminal UI: ${message}` };
+          warnings.push(`Unable to restore terminal UI: ${message}`);
         }
       }
     }
 
+    if (result && warnings.length > 0) {
+      result.warnings = warnings;
+    }
     this.finish(result);
   }
 }
@@ -865,24 +905,25 @@ async function editCodeBeforeCopy(code: string, ctx: AnyContext): Promise<Editor
 type ExtensionRuntime = {
   copyNative: (text: string) => string | undefined;
   stdout: Stdout;
-  requestFullRender?: (ctx: AnyContext) => Promise<void>;
+  requestFullRender?: (ctx: AnyContext) => void | Promise<void>;
 };
 
-async function requestFullRender(ctx: AnyContext): Promise<void> {
-  await ctx.ui.custom<void>((_tui, _theme, _keybindings, done) => {
-    let rendered = false;
-    return {
-      render: () => {
-        if (!rendered) {
-          rendered = true;
-          setTimeout(() => done(), 0);
-        }
-        return [];
+function requestFullRender(ctx: AnyContext): void {
+  try {
+    const pending = ctx.ui.custom<void>(
+      (tui, _theme, _keybindings, done) => {
+        tui.requestRender(true);
+        done();
+        return {
+          render: () => [],
+          handleInput: () => {},
+          invalidate: () => {},
+        };
       },
-      handleInput: () => {},
-      invalidate: () => {},
-    };
-  });
+      { overlay: true },
+    );
+    void Promise.resolve(pending).catch(() => {});
+  } catch {}
 }
 
 export default function copyCodeExtension(
@@ -940,6 +981,9 @@ export default function copyCodeExtension(
           ctx.ui.notify(`Copy failed: ${edited.error}`, "error");
           return;
         }
+        for (const warning of edited.warnings ?? []) {
+          ctx.ui.notify(`Copy warning: ${warning}`, "warning");
+        }
         text = edited.code;
       } else {
         text = result.code;
@@ -956,7 +1000,10 @@ export default function copyCodeExtension(
       if (outcome.kind === "native") {
         ctx.ui.notify(`Copied ${lineLabel} via ${outcome.command}`, "info");
       } else {
-        await runtime.requestFullRender?.(ctx);
+        try {
+          const pendingRender = runtime.requestFullRender?.(ctx);
+          void Promise.resolve(pendingRender).catch(() => {});
+        } catch {}
         ctx.ui.notify(`Sent ${lineLabel} to terminal clipboard via OSC 52 (best effort)`, "info");
       }
     } catch (error) {

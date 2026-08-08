@@ -239,31 +239,66 @@ test("splitEditorCommand preserves quoted editor commands", () => {
   ]);
 });
 
-test("buildEditorSpawn uses direct argv and only wraps Windows command shims", () => {
+test("buildEditorSpawn uses direct argv on POSIX and for native Windows executables", () => {
   assert.deepEqual(
     extension.buildEditorSpawn('nvim --cmd "set background=dark"', "/tmp/code & notes.txt", "linux"),
-    { command: "nvim", args: ["--cmd", "set background=dark", "/tmp/code & notes.txt"] },
+    { command: "nvim", args: ["--cmd", "set background=dark", "/tmp/code & notes.txt"], options: {} },
   );
   assert.deepEqual(
+    extension.buildEditorSpawn('"C:\\Tools\\edit.exe" --wait', "C:\\Temp\\code & notes.txt", "win32"),
+    {
+      command: "C:\\Tools\\edit.exe",
+      args: ["--wait", "C:\\Temp\\code & notes.txt"],
+      options: {},
+    },
+  );
+  assert.deepEqual(
+    extension.buildEditorSpawn('"C:\\Tools\\edit.com"', "C:\\Temp\\code.txt", "win32"),
+    { command: "C:\\Tools\\edit.com", args: ["C:\\Temp\\code.txt"], options: {} },
+  );
+});
+
+test("buildEditorSpawn safely wraps Windows shims and extension-less commands in one cmd command string", () => {
+  assert.deepEqual(
     extension.buildEditorSpawn(
-      '"C:\\Tools\\Code.cmd" --wait',
-      "C:\\Temp\\code & notes.txt",
+      '"C:\\Program Files\\Microsoft VS Code\\bin\\code.cmd" --wait --reuse-window',
+      "C:\\Temp Files\\code & notes (1) ^ done.txt",
       "win32",
       "C:\\Windows\\System32\\cmd.exe",
     ),
     {
       command: "C:\\Windows\\System32\\cmd.exe",
-      args: ["/d", "/s", "/c", "C:\\Tools\\Code.cmd", "--wait", "C:\\Temp\\code & notes.txt"],
+      args: [
+        "/d",
+        "/s",
+        "/c",
+        '"C:\\Program^ Files\\Microsoft^ VS^ Code\\bin\\code.cmd ^"--wait^" ^"--reuse-window^" ^"C:\\Temp^ Files\\code^ ^&^ notes^ ^(1^)^ ^^^ done.txt^""',
+      ],
+      options: { windowsVerbatimArguments: true },
     },
   );
   assert.deepEqual(
-    extension.buildEditorSpawn('"C:\\Tools\\edit.BAT"', "C:\\Temp\\code.txt", "win32"),
-    { command: "cmd.exe", args: ["/d", "/s", "/c", "C:\\Tools\\edit.BAT", "C:\\Temp\\code.txt"] },
+    extension.buildEditorSpawn("code --wait", "C:\\Temp\\code.txt", "win32"),
+    {
+      command: "cmd.exe",
+      args: ["/d", "/s", "/c", '"code ^"--wait^" ^"C:\\Temp\\code.txt^""'],
+      options: { windowsVerbatimArguments: true },
+    },
   );
   assert.deepEqual(
-    extension.buildEditorSpawn('"C:\\Tools\\edit.exe"', "C:\\Temp\\code.txt", "win32"),
-    { command: "C:\\Tools\\edit.exe", args: ["C:\\Temp\\code.txt"] },
+    extension.buildEditorSpawn("nvim", "C:\\Temp\\code.txt", "win32"),
+    {
+      command: "cmd.exe",
+      args: ["/d", "/s", "/c", '"nvim ^"C:\\Temp\\code.txt^""'],
+      options: { windowsVerbatimArguments: true },
+    },
   );
+});
+
+test("resolveEditorCommand falls through an empty VISUAL while injected commands retain precedence", () => {
+  assert.equal(extension.resolveEditorCommand(undefined, { VISUAL: "", EDITOR: "nvim" }), "nvim");
+  assert.equal(extension.resolveEditorCommand("code --wait", { VISUAL: "vim", EDITOR: "nvim" }), "code --wait");
+  assert.equal(extension.resolveEditorCommand("", { VISUAL: "vim", EDITOR: "nvim" }), "");
 });
 
 test("picker Ctrl+C cancels both normal and search modes", () => {
@@ -339,6 +374,93 @@ test("external editor spawn failure completes once, restores the TUI, and cleans
   assert.deepEqual(fs.readdirSync(root), []);
 });
 
+test("external editor reports a missing editor without stopping the TUI", async () => {
+  const results = [];
+  const component = new extension.ExternalEditorComponent(
+    "original",
+    { stop() { throw new Error("must not stop"); } },
+    (result) => results.push(result),
+    { editorCommand: "" },
+  );
+
+  component.render(80);
+  await waitUntil(() => results.length === 1);
+
+  assert.deepEqual(results, [{ error: "No external editor configured. Set $VISUAL or $EDITOR." }]);
+});
+
+test("external editor reports a nonzero editor status and restores the TUI", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-copy-code-test-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const editorScript = path.join(root, "editor.mjs");
+  fs.writeFileSync(editorScript, "process.exit(7);");
+  const tuiCalls = [];
+  const results = [];
+  const component = new extension.ExternalEditorComponent(
+    "original",
+    {
+      stop() { tuiCalls.push("stop"); },
+      start() { tuiCalls.push("start"); },
+      requestRender(full) { tuiCalls.push(["render", full]); },
+    },
+    (result) => results.push(result),
+    { editorCommand: `"${process.execPath}" "${editorScript}"`, tempRoot: root },
+  );
+
+  component.render(80);
+  await waitUntil(() => results.length === 1);
+
+  assert.deepEqual(results, [{ error: "Editor exited with status 7" }]);
+  assert.deepEqual(tuiCalls, ["stop", "start", ["render", true]]);
+});
+
+test("external editor preserves edited code when temporary cleanup fails", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-copy-code-test-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const editorScript = path.join(root, "editor.mjs");
+  fs.writeFileSync(editorScript, "// leave the file unchanged\n");
+  const results = [];
+  const component = new extension.ExternalEditorComponent(
+    "original",
+    { stop() {}, start() {}, requestRender() {} },
+    (result) => results.push(result),
+    {
+      editorCommand: `"${process.execPath}" "${editorScript}"`,
+      tempRoot: root,
+      removeTemp() { throw new Error("cleanup denied"); },
+    },
+  );
+
+  component.render(80);
+  await waitUntil(() => results.length === 1);
+
+  assert.deepEqual(results, [{ code: "original", warnings: ["Unable to remove editor files: cleanup denied"] }]);
+});
+
+test("external editor preserves edited code when TUI restoration fails", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-copy-code-test-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const editorScript = path.join(root, "editor.mjs");
+  fs.writeFileSync(editorScript, "// leave the file unchanged\n");
+  const results = [];
+  const component = new extension.ExternalEditorComponent(
+    "original",
+    {
+      stop() {},
+      start() { throw new Error("terminal unavailable"); },
+      requestRender() { throw new Error("must not render after failed start"); },
+    },
+    (result) => results.push(result),
+    { editorCommand: `"${process.execPath}" "${editorScript}"`, tempRoot: root },
+  );
+
+  component.render(80);
+  await waitUntil(() => results.length === 1);
+
+  assert.deepEqual(results, [{ code: "original", warnings: ["Unable to restore terminal UI: terminal unavailable"] }]);
+  assert.deepEqual(fs.readdirSync(root), ["editor.mjs"]);
+});
+
 test("external editor setup failure completes once without restarting the TUI", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-copy-code-test-"));
   fs.rmSync(root, { recursive: true });
@@ -396,6 +518,61 @@ test("native and OSC 52 clipboard outcomes have accurate messages and rendering"
   ]);
   assert.deepEqual(osc52.renderCalls, [true]);
   assert.match(osc52.writes.join(""), /^\x1b\]52;c;/);
+});
+
+test("production OSC 52 render path forces a real TUI render without awaiting the overlay", async () => {
+  const harness = registerForClipboardTests({ nativeCommand: null, isTTY: true, useProductionRender: true });
+  const context = createClipboardContext(harness);
+  context.ui.custom = (factory, options) => {
+    assert.deepEqual(options, { overlay: true });
+    factory(
+      { requestRender(force) { harness.renderCalls.push(force); } },
+      {},
+      {},
+      () => harness.doneCalls.push(true),
+    );
+    return new Promise(() => {});
+  };
+
+  await Promise.race([
+    harness.commands[0].options.handler("", context),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("copy command hung on render overlay")), 100)),
+  ]);
+
+  assert.deepEqual(harness.renderCalls, [true]);
+  assert.deepEqual(harness.doneCalls, [true]);
+  assert.deepEqual(harness.notifications, [
+    { message: "Sent 1 line to terminal clipboard via OSC 52 (best effort)", type: "info" },
+  ]);
+});
+
+test("OSC 52 render failure does not invert a successful clipboard send", async () => {
+  const harness = registerForClipboardTests({ nativeCommand: null, isTTY: true, useProductionRender: true });
+  const context = createClipboardContext(harness);
+  context.ui.custom = (factory) => {
+    factory({ requestRender() { throw new Error("render failed"); } }, {}, {}, () => {});
+    return Promise.reject(new Error("overlay failed"));
+  };
+
+  await harness.commands[0].options.handler("", context);
+
+  assert.equal(harness.writes.length, 1);
+  assert.deepEqual(harness.notifications, [
+    { message: "Sent 1 line to terminal clipboard via OSC 52 (best effort)", type: "info" },
+  ]);
+});
+
+test("OSC 52 rejects oversized TTY payloads without writing", async () => {
+  const harness = registerForClipboardTests({ nativeCommand: null, isTTY: true });
+  const context = createClipboardContext(harness);
+  context.sessionManager.getEntries = () => [assistantEntry(`\`\`\`text\n${"x".repeat(75_001)}\n\`\`\``)];
+
+  await harness.commands[0].options.handler("", context);
+
+  assert.deepEqual(harness.writes, []);
+  assert.deepEqual(harness.notifications, [
+    { message: "Copy failed: Clipboard unavailable: OSC 52 payload is too large", type: "error" },
+  ]);
 });
 
 test("clipboard fallback reports terminal unavailable without a TTY", async () => {
@@ -708,20 +885,23 @@ test("stale session completion cannot clear the active session guard", async () 
   await waitForMicrotasks();
 });
 
-function registerForClipboardTests({ nativeCommand, isTTY = false }) {
+function registerForClipboardTests({ nativeCommand, isTTY = false, useProductionRender = false }) {
   const commands = [];
-  const harness = { commands, notifications: [], renderCalls: [], writes: [] };
+  const harness = { commands, notifications: [], renderCalls: [], doneCalls: [], writes: [] };
+  const runtime = {
+    copyNative: () => nativeCommand,
+    stdout: { isTTY, write(data) { harness.writes.push(data); return true; } },
+  };
+  if (!useProductionRender) {
+    runtime.requestFullRender = () => harness.renderCalls.push(true);
+  }
   extension.default(
     {
       on() {},
       registerCommand(name, options) { commands.push({ name, options }); },
       registerShortcut() {},
     },
-    {
-      copyNative: () => nativeCommand,
-      stdout: { isTTY, write(data) { harness.writes.push(data); return true; } },
-      requestFullRender: async () => harness.renderCalls.push(true),
-    },
+    runtime,
   );
   return harness;
 }
