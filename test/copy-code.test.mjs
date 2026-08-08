@@ -349,6 +349,25 @@ test("external editor uses private storage, edits, and cleans up without followi
   assert.deepEqual(fs.readdirSync(root).sort(), ["editor.mjs", "pi-copy-code.txt", "victim.txt"]);
 });
 
+test("external editor removes a final CRLF from edited code", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-copy-code-test-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const editorScript = path.join(root, "editor.mjs");
+  fs.writeFileSync(editorScript, "import fs from 'node:fs'; fs.writeFileSync(process.argv.at(-1), 'edited\\r\\n');");
+  const results = [];
+  const component = new extension.ExternalEditorComponent(
+    "original",
+    { stop() {}, start() {}, requestRender() {} },
+    (result) => results.push(result),
+    { editorCommand: `"${process.execPath}" "${editorScript}"`, tempRoot: root },
+  );
+
+  component.render(80);
+  await waitUntil(() => results.length === 1);
+
+  assert.deepEqual(results, [{ code: "edited" }]);
+});
+
 test("external editor spawn failure completes once, restores the TUI, and cleans up", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-copy-code-test-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

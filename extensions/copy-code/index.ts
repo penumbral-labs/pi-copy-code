@@ -861,7 +861,7 @@ export class ExternalEditorComponent {
       } else if (processResult.status !== 0) {
         result = { error: `Editor exited with status ${processResult.status ?? "unknown"}` };
       } else {
-        result = { code: fs.readFileSync(tmpFile, "utf8").replace(/\n$/, "") };
+        result = { code: fs.readFileSync(tmpFile, "utf8").replace(/\r?\n$/, "") };
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
