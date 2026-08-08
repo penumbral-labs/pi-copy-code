@@ -1,0 +1,79 @@
+name: Feature request
+description: Propose a focused improvement to pi-copy-code
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for proposing an improvement. Explain the concrete copying workflow it would improve.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem or limitation do you encounter?
+      placeholder: Describe the workflow and why current behavior is insufficient.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What should pi-copy-code do instead?
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal
+      placeholder: e.g. WezTerm 20240203, Terminal.app 2.14
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: e.g. macOS 15.5, Ubuntu 24.04, Windows 11
+    validations:
+      required: true
+  - type: input
+    id: pi-version
+    attributes:
+      label: Pi version
+      placeholder: e.g. 0.84.1
+    validations:
+      required: true
+  - type: input
+    id: package-version
+    attributes:
+      label: pi-copy-code version
+      placeholder: e.g. 0.3.0
+    validations:
+      required: true
+  - type: dropdown
+    id: shortcut
+    attributes:
+      label: Relevant command or shortcut
+      options:
+        - /copy-code
+        - /copy-code edit
+        - ctrl+alt+c
+        - ctrl+super+c
+        - alt+c remapping path
+        - Not shortcut-related
+    validations:
+      required: true
+  - type: textarea
+    id: remapping
+    attributes:
+      label: Modifier remapping and keyboard protocol
+      description:
+        Note Ctrl/Command/Meta remapping and Kitty or other enhanced keyboard protocol settings, or write None.
+      placeholder: None
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: How do you handle this workflow today?

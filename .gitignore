@@ -3,3 +3,12 @@ dist/
 coverage/
 *.log
 .DS_Store
+
+.scratch/
+.pi/
+.pi-subagents/
+.impeccable/
+CLAUDE.local.md
+*.tgz
+.claude/*
+!.claude/CLAUDE.md

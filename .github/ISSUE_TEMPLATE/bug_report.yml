@@ -1,0 +1,115 @@
+name: Bug report
+description: Report reproducible incorrect behavior in pi-copy-code
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Do not report vulnerabilities here. Use the private GitHub Security Advisory link in SECURITY.md.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include a minimal fenced response and the exact command or key sequence.
+      placeholder: |
+        1. Start Pi with ...
+        2. Produce this fenced block ...
+        3. Press ...
+        4. Observe ...
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal
+      placeholder: e.g. WezTerm 20240203, Terminal.app 2.14
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: e.g. macOS 15.5, Ubuntu 24.04, Windows 11
+    validations:
+      required: true
+  - type: input
+    id: pi-version
+    attributes:
+      label: Pi version
+      placeholder: e.g. 0.84.1
+    validations:
+      required: true
+  - type: input
+    id: package-version
+    attributes:
+      label: pi-copy-code version
+      placeholder: e.g. 0.3.0
+    validations:
+      required: true
+  - type: dropdown
+    id: shortcut
+    attributes:
+      label: Command or shortcut used
+      options:
+        - /copy-code
+        - /copy-code edit
+        - ctrl+alt+c
+        - ctrl+super+c
+        - alt+c remapping path
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: remapping
+    attributes:
+      label: Modifier remapping and keyboard protocol
+      description:
+        Note Ctrl/Command/Meta remapping and Kitty or other enhanced keyboard protocol settings, or write None.
+      placeholder: None
+    validations:
+      required: true
+  - type: dropdown
+    id: clipboard
+    attributes:
+      label: Clipboard path
+      options:
+        - pbcopy
+        - wl-copy
+        - xclip
+        - xsel
+        - clip.exe
+        - OSC 52
+        - Unknown or unavailable
+    validations:
+      required: true
+  - type: input
+    id: editor
+    attributes:
+      label: VISUAL or EDITOR value
+      description: Required for edit-mode reports; otherwise write Not applicable.
+      placeholder: e.g. nvim, code --wait, Not applicable
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Additional output
+      description: Paste relevant errors or screenshots. Remove sensitive code and environment details.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I can reproduce this with the package version listed above.
+          required: true
+        - label: This report does not contain a vulnerability or sensitive code.
+          required: true
