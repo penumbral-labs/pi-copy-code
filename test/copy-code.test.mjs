@@ -41,7 +41,7 @@ test("extractCodeBlocks preserves whitespace and language", () => {
   ]);
 });
 
-test("extractCodeBlocks strips structural indentation from nested fences", () => {
+test("extractCodeBlocks strips structural indentation from sibling backtick and tilde fences", () => {
   const markdown = [
     "  ```ts",
     "  const top = true;",

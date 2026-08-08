@@ -4,6 +4,7 @@
 
 ## Verification
 
+- [ ] `npm ci`
 - [ ] `npm run check`
 - [ ] `npm audit --omit=dev`
 - [ ] `npm pack --dry-run`
