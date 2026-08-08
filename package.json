@@ -1,6 +1,6 @@
 {
   "name": "@penumbral-labs/pi-copy-code",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A pi extension for ergonomic copying of assistant code blocks.",
   "type": "module",
   "keywords": [
@@ -20,11 +20,12 @@
     "url": "https://github.com/penumbral-labs/pi-copy-code/issues"
   },
   "engines": {
-    "node": ">=20.6.0"
+    "node": ">=22.19.0"
   },
   "files": [
-    "extensions",
+    "extensions/copy-code/index.ts",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "pi": {
@@ -33,7 +34,10 @@
     ]
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.mjs",
+    "verify-package": "node scripts/verify-package.mjs",
+    "check": "npm run typecheck && npm test && npm run verify-package"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
@@ -43,8 +47,9 @@
     "access": "public"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.74.0",
-    "@earendil-works/pi-tui": "^0.74.0",
-    "jiti": "^2.7.0"
+    "@earendil-works/pi-coding-agent": "0.84.1",
+    "@earendil-works/pi-tui": "0.84.1",
+    "jiti": "2.7.0",
+    "typescript": "5.9.3"
   }
 }

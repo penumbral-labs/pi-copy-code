@@ -1,23 +1,69 @@
 name: Publish to npm
 
 on:
-  push:
-    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to validate (for example, v0.3.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
+  validate-release:
+    name: validate-release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release-tag.outputs.tag }}
+    steps:
+      - name: Check out version to validate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
+      - name: Set release tag
+        id: release-tag
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
+        run: echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+      - name: Verify release tag matches package version
+        env:
+          RELEASE_TAG: ${{ steps.release-tag.outputs.tag }}
+        run: |
+          node <<'NODE'
+          const expected = `v${require("./package.json").version}`;
+          if (process.env.RELEASE_TAG !== expected) {
+            console.error(`Release tag ${process.env.RELEASE_TAG} does not match ${expected}`);
+            process.exit(1);
+          }
+          NODE
+
   publish:
+    name: publish
+    needs: validate-release
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - name: Check out validated version
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event_name == 'release' && needs.validate-release.outputs.tag || github.sha }}
+      - name: Set up Node.js 24
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: "24"
-          registry-url: "https://registry.npmjs.org"
+          cache: npm
+          registry-url: https://registry.npmjs.org
       - run: npm ci
-      - run: npm test
-      - uses: JS-DevTools/npm-publish@v4
-        with:
-          access: public
+      - run: npm run check
+      - name: Exercise npm publish without a registry write
+        if: github.event_name == 'workflow_dispatch'
+        run: npm publish --dry-run --provenance
+      - name: Publish package
+        if: github.event_name == 'release'
+        run: npm publish --provenance
