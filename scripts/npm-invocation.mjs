@@ -9,3 +9,7 @@ export function selectNpmInvocation({ platform, npmExecPath, nodeExecPath, npmRu
 
   return { command: "npm", prefixArguments: [] };
 }
+
+export function npmPackFailureMessage({ error, stderr }) {
+  return error?.message ?? stderr ?? "npm pack failed without diagnostic output";
+}

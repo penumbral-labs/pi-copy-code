@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { selectNpmInvocation } from "./npm-invocation.mjs";
+import { npmPackFailureMessage, selectNpmInvocation } from "./npm-invocation.mjs";
 
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
@@ -30,8 +30,8 @@ const pack = spawnSync(
   },
 );
 
-if (pack.status !== 0) {
-  process.stderr.write(pack.stderr);
+if (pack.error || pack.status !== 0) {
+  process.stderr.write(npmPackFailureMessage(pack));
   process.exit(pack.status ?? 1);
 }
 

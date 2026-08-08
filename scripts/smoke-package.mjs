@@ -9,13 +9,13 @@ import { selectNpmInvocation } from "./npm-invocation.mjs";
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const packageJson = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 const jitiModuleUrl = import.meta.resolve("jiti");
-const temporaryRoot = mkdtempSync(path.join(tmpdir(), "pi-copy-code-smoke-"));
 const npmInvocation = selectNpmInvocation({
   platform: process.platform,
   npmExecPath: process.env.npm_execpath,
   nodeExecPath: process.execPath,
   npmRunCommand: "npm run smoke-package",
 });
+const temporaryRoot = mkdtempSync(path.join(tmpdir(), "pi-copy-code-smoke-"));
 const npmArguments = (arguments_) => [...npmInvocation.prefixArguments, ...arguments_];
 
 try {

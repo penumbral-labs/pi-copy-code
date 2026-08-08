@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { selectNpmInvocation } from "../scripts/npm-invocation.mjs";
+import { npmPackFailureMessage, selectNpmInvocation } from "../scripts/npm-invocation.mjs";
 
 test("uses npm_execpath through Node when npm supplies it", () => {
   assert.deepEqual(
@@ -40,4 +40,12 @@ test("rejects direct Windows invocation with the documented npm run command", ()
       }),
     /Cannot invoke npm directly on Windows without npm_execpath\. Run `npm run smoke-package` instead\./,
   );
+});
+
+test("reports an npm pack spawn error when stderr is unavailable", () => {
+  assert.equal(npmPackFailureMessage({ error: new Error("spawn npm ENOENT"), stderr: undefined }), "spawn npm ENOENT");
+});
+
+test("reports npm pack stderr when the process starts but fails", () => {
+  assert.equal(npmPackFailureMessage({ error: undefined, stderr: "npm error" }), "npm error");
 });
