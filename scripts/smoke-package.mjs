@@ -4,17 +4,24 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { selectNpmInvocation } from "./npm-invocation.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const packageJson = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 const jitiModuleUrl = import.meta.resolve("jiti");
 const temporaryRoot = mkdtempSync(path.join(tmpdir(), "pi-copy-code-smoke-"));
-const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmInvocation = selectNpmInvocation({
+  platform: process.platform,
+  npmExecPath: process.env.npm_execpath,
+  nodeExecPath: process.execPath,
+  npmRunCommand: "npm run smoke-package",
+});
+const npmArguments = (arguments_) => [...npmInvocation.prefixArguments, ...arguments_];
 
 try {
   const packOutput = execFileSync(
-    npmCommand,
-    ["pack", "--json", "--ignore-scripts", "--pack-destination", temporaryRoot],
+    npmInvocation.command,
+    npmArguments(["pack", "--json", "--ignore-scripts", "--pack-destination", temporaryRoot]),
     {
       cwd: repoRoot,
       encoding: "utf8",
@@ -25,13 +32,26 @@ try {
   const harnessRoot = path.join(temporaryRoot, "harness");
   mkdirSync(harnessRoot);
 
-  execFileSync(npmCommand, ["init", "--yes"], { cwd: temporaryRoot, stdio: "ignore" });
+  execFileSync(npmInvocation.command, npmArguments(["init", "--yes"]), {
+    cwd: temporaryRoot,
+    stdio: "ignore",
+  });
   execFileSync(
-    npmCommand,
-    ["install", "--ignore-scripts", "--omit=dev", "--prefix", installRoot, path.join(temporaryRoot, filename)],
+    npmInvocation.command,
+    npmArguments([
+      "install",
+      "--ignore-scripts",
+      "--omit=dev",
+      "--prefix",
+      installRoot,
+      path.join(temporaryRoot, filename),
+    ]),
     { cwd: temporaryRoot, stdio: "pipe" },
   );
-  execFileSync(npmCommand, ["init", "--yes"], { cwd: harnessRoot, stdio: "ignore" });
+  execFileSync(npmInvocation.command, npmArguments(["init", "--yes"]), {
+    cwd: harnessRoot,
+    stdio: "ignore",
+  });
 
   const installedPackageRoot = path.join(installRoot, "node_modules", ...packageJson.name.split("/"));
   const extensionPath = path.join(installedPackageRoot, packageJson.pi.extensions[0]);

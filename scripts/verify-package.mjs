@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { selectNpmInvocation } from "./npm-invocation.mjs";
 
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
 const expectedFiles = [...packageJson.files, "package.json"].sort();
-const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmInvocation = selectNpmInvocation({
+  platform: process.platform,
+  npmExecPath: process.env.npm_execpath,
+  nodeExecPath: process.execPath,
+  npmRunCommand: "npm run verify-package",
+});
 
 assert.equal(lockfile.name, packageJson.name, "package-lock.json name must match package.json");
 assert.equal(lockfile.version, packageJson.version, "package-lock.json version must match package.json");
@@ -15,10 +21,14 @@ assert.equal(packageJson.scripts?.preinstall, undefined, "preinstall scripts are
 assert.equal(packageJson.scripts?.install, undefined, "install scripts are not allowed");
 assert.equal(packageJson.scripts?.postinstall, undefined, "postinstall scripts are not allowed");
 
-const pack = spawnSync(npmCommand, ["pack", "--dry-run", "--json", "--ignore-scripts"], {
-  cwd: new URL("..", import.meta.url),
-  encoding: "utf8",
-});
+const pack = spawnSync(
+  npmInvocation.command,
+  [...npmInvocation.prefixArguments, "pack", "--dry-run", "--json", "--ignore-scripts"],
+  {
+    cwd: new URL("..", import.meta.url),
+    encoding: "utf8",
+  },
+);
 
 if (pack.status !== 0) {
   process.stderr.write(pack.stderr);
