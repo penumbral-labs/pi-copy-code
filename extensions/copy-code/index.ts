@@ -117,6 +117,7 @@ export function extractCodeBlocks(markdown: string): CodeBlock[] {
 
   let fenceChar: "`" | "~" | undefined;
   let fenceLength = 0;
+  let fenceIndent = "";
   let lang = "";
   let buffer: string[] = [];
 
@@ -129,6 +130,7 @@ export function extractCodeBlocks(markdown: string): CodeBlock[] {
 
       fenceChar = open[1][0] as "`" | "~";
       fenceLength = open[1].length;
+      fenceIndent = line.slice(0, line.length - open[1].length - open[2].length);
       lang = (open[2] || "").trim().split(/\s+/)[0] || "";
       buffer = [];
       continue;
@@ -140,12 +142,22 @@ export function extractCodeBlocks(markdown: string): CodeBlock[] {
       blocks.push({ index: blocks.length + 1, lang, code: buffer.join("\n") });
       fenceChar = undefined;
       fenceLength = 0;
+      fenceIndent = "";
       lang = "";
       buffer = [];
       continue;
     }
 
-    buffer.push(line);
+    if (line.trim() === "") {
+      buffer.push(line);
+      continue;
+    }
+
+    let remove = 0;
+    while (remove < fenceIndent.length && remove < line.length && /[ \t]/.test(line[remove])) {
+      remove += 1;
+    }
+    buffer.push(line.slice(remove));
   }
 
   return blocks;
@@ -184,27 +196,30 @@ function copyNative(text: string): string | undefined {
   return undefined;
 }
 
-function copyOsc52(text: string): boolean {
+type ClipboardOutcome = { kind: "native"; command: string } | { kind: "osc52" };
+type Stdout = Pick<NodeJS.WriteStream, "isTTY" | "write">;
+
+function copyToClipboard(
+  text: string,
+  nativeCopy: (value: string) => string | undefined,
+  stdout: Stdout,
+): ClipboardOutcome {
+  const native = nativeCopy(text);
+  if (native) {
+    return { kind: "native", command: native };
+  }
+
+  if (!stdout.isTTY) {
+    throw new Error("Clipboard unavailable: no native command found and terminal clipboard is not available");
+  }
+
   const encoded = Buffer.from(text, "utf8").toString("base64");
   if (encoded.length > 100_000) {
-    return false;
+    throw new Error("Clipboard unavailable: OSC 52 payload is too large");
   }
 
-  process.stdout.write(`\x1b]52;c;${encoded}\x07`);
-  return true;
-}
-
-function copyToClipboard(text: string): string {
-  const native = copyNative(text);
-  if (native) {
-    return native;
-  }
-
-  if (copyOsc52(text)) {
-    return "OSC 52";
-  }
-
-  throw new Error("Clipboard unavailable: no native command found and text is too large for terminal copy");
+  stdout.write(`\x1b]52;c;${encoded}\x07`);
+  return { kind: "osc52" };
 }
 
 function lineCount(text: string): number {
@@ -371,7 +386,7 @@ function isPrintable(data: string): boolean {
   return data.length === 1 && data >= " " && data !== "\x7f";
 }
 
-class CodeBlockPickerComponent {
+export class CodeBlockPickerComponent {
   private selected = 0;
   private messageIndex: number;
   private readonly choicesByMessage: CopyChoice[][];
@@ -574,6 +589,11 @@ class CodeBlockPickerComponent {
   handleInput(data: string): void {
     const visibleItems = this.visibleItems();
 
+    if (matchesKey(data, "ctrl+c")) {
+      this.done(undefined);
+      return;
+    }
+
     if (this.searching) {
       if (matchesKey(data, "escape")) {
         this.exitSearch();
@@ -703,13 +723,38 @@ export function splitEditorCommand(command: string): string[] {
   return parts;
 }
 
-class ExternalEditorComponent {
+type EditorSpawn = { command: string; args: string[] };
+
+export function buildEditorSpawn(
+  editorCommand: string,
+  file: string,
+  platform: NodeJS.Platform = process.platform,
+  commandProcessor = process.env.ComSpec || "cmd.exe",
+): EditorSpawn {
+  const [editor, ...editorArgs] = splitEditorCommand(editorCommand);
+  if (!editor) {
+    throw new Error("Editor command is empty");
+  }
+
+  const args = [...editorArgs, file];
+  return platform === "win32" && /\.(?:cmd|bat)$/i.test(editor)
+    ? { command: commandProcessor, args: ["/d", "/s", "/c", editor, ...args] }
+    : { command: editor, args };
+}
+
+type EditorResult = { code: string } | { error: string } | undefined;
+type ExternalEditorOptions = { editorCommand?: string; tempRoot?: string };
+
+export class ExternalEditorComponent {
   private started = false;
+  private completed = false;
+  private handedOff = false;
 
   constructor(
     private code: string,
     private tui: TUI,
-    private done: (result: string | undefined) => void,
+    private done: (result: EditorResult) => void,
+    private options: ExternalEditorOptions = {},
   ) {}
 
   render(width: number): string[] {
@@ -717,76 +762,139 @@ class ExternalEditorComponent {
       this.started = true;
       setTimeout(() => this.openExternalEditor(), 0);
     }
-
     return [truncateToWidth("Opening external editor…", width, undefined, true)];
   }
 
   handleInput(data: string): void {
-    if (matchesKey(data, "escape") || data === "q") {
-      this.done(undefined);
+    if (!this.handedOff && (matchesKey(data, "ctrl+c") || matchesKey(data, "escape") || data === "q")) {
+      this.finish(undefined);
     }
   }
 
   invalidate(): void {}
 
+  private finish(result: EditorResult): void {
+    if (!this.completed) {
+      this.completed = true;
+      this.done(result);
+    }
+  }
+
   private openExternalEditor(): void {
-    const editorCommand = process.env.VISUAL || process.env.EDITOR;
-    if (!editorCommand) {
-      this.done(undefined);
+    if (this.completed) {
       return;
     }
 
-    const tmpFile = path.join(os.tmpdir(), `pi-copy-code-${Date.now()}.txt`);
-
-    let edited: string | undefined;
-
-    try {
-      fs.writeFileSync(tmpFile, this.code, "utf-8");
-      this.tui.stop();
-
-      const [editor, ...editorArgs] = splitEditorCommand(editorCommand);
-      if (!editor) {
-        this.done(undefined);
-        return;
-      }
-
-      const result = spawnSync(editor, [...editorArgs, tmpFile], {
-        stdio: "inherit",
-        shell: process.platform === "win32",
-      });
-
-      if (result.status === 0) {
-        edited = fs.readFileSync(tmpFile, "utf-8").replace(/\n$/, "");
-      }
-    } finally {
-      try {
-        fs.unlinkSync(tmpFile);
-      } catch {}
-
-      this.tui.start();
-      this.tui.requestRender(true);
+    const editorCommand = this.options.editorCommand ?? process.env.VISUAL ?? process.env.EDITOR;
+    if (!editorCommand) {
+      this.finish({ error: "No external editor configured. Set $VISUAL or $EDITOR." });
+      return;
     }
 
-    this.done(edited);
+    let tmpDir: string | undefined;
+    let tmpFile: string;
+    try {
+      tmpDir = fs.mkdtempSync(path.join(this.options.tempRoot ?? os.tmpdir(), "pi-copy-code-"));
+      tmpFile = path.join(tmpDir, "code.txt");
+      fs.writeFileSync(tmpFile, this.code, { encoding: "utf8", flag: "wx" });
+    } catch (error) {
+      if (tmpDir) {
+        try {
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        } catch {}
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      this.finish({ error: `Unable to prepare editor file: ${message}` });
+      return;
+    }
+
+    if (this.completed) {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      return;
+    }
+
+    let result: EditorResult;
+    let tuiStopped = false;
+    try {
+      const invocation = buildEditorSpawn(editorCommand, tmpFile);
+      this.handedOff = true;
+      this.tui.stop();
+      tuiStopped = true;
+
+      const processResult = spawnSync(invocation.command, invocation.args, { stdio: "inherit" });
+      if (processResult.error) {
+        result = { error: `Unable to start editor: ${processResult.error.message}` };
+      } else if (processResult.status !== 0) {
+        result = { error: `Editor exited with status ${processResult.status ?? "unknown"}` };
+      } else {
+        result = { code: fs.readFileSync(tmpFile, "utf8").replace(/\n$/, "") };
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      result = { error: `Editor failed: ${message}` };
+    } finally {
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        result = { error: `Unable to remove editor files: ${message}` };
+      }
+
+      if (tuiStopped) {
+        try {
+          this.tui.start();
+          this.tui.requestRender(true);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          result = { error: `Unable to restore terminal UI: ${message}` };
+        }
+      }
+    }
+
+    this.finish(result);
   }
 }
 
-async function editCodeBeforeCopy(
-  code: string,
-  ctx: AnyContext,
-): Promise<string | undefined> {
-  if (!(process.env.VISUAL || process.env.EDITOR)) {
-    ctx.ui.notify("No external editor configured. Set $VISUAL or $EDITOR.", "warning");
-    return undefined;
-  }
-
-  return await ctx.ui.custom<string | undefined>(
+async function editCodeBeforeCopy(code: string, ctx: AnyContext): Promise<EditorResult> {
+  return await ctx.ui.custom<EditorResult>(
     (tui, _theme, _keybindings, done) => new ExternalEditorComponent(code, tui, done),
     { overlay: true },
   );
 }
 
-export default function copyCodeExtension(pi: ExtensionAPI) {
+type ExtensionRuntime = {
+  copyNative: (text: string) => string | undefined;
+  stdout: Stdout;
+  requestFullRender?: (ctx: AnyContext) => Promise<void>;
+};
+
+async function requestFullRender(ctx: AnyContext): Promise<void> {
+  await ctx.ui.custom<void>((_tui, _theme, _keybindings, done) => {
+    let rendered = false;
+    return {
+      render: () => {
+        if (!rendered) {
+          rendered = true;
+          setTimeout(() => done(), 0);
+        }
+        return [];
+      },
+      handleInput: () => {},
+      invalidate: () => {},
+    };
+  });
+}
+
+export default function copyCodeExtension(
+  pi: ExtensionAPI,
+  runtimeOverrides: Partial<ExtensionRuntime> = {},
+) {
+  const runtime: ExtensionRuntime = {
+    copyNative,
+    stdout: process.stdout,
+    requestFullRender,
+    ...runtimeOverrides,
+  };
   let unsubscribeTerminalInput: (() => void) | undefined;
   let sessionEpoch = 0;
   let activeRunEpoch: number | undefined;
@@ -828,7 +936,11 @@ export default function copyCodeExtension(pi: ExtensionAPI) {
           ctx.ui.notify("Copy cancelled", "info");
           return;
         }
-        text = edited;
+        if ("error" in edited) {
+          ctx.ui.notify(`Copy failed: ${edited.error}`, "error");
+          return;
+        }
+        text = edited.code;
       } else {
         text = result.code;
       }
@@ -838,9 +950,15 @@ export default function copyCodeExtension(pi: ExtensionAPI) {
     }
 
     try {
-      const via = copyToClipboard(text);
+      const outcome = copyToClipboard(text, runtime.copyNative, runtime.stdout);
       const lines = lineCount(text);
-      ctx.ui.notify(`Copied ${lines} line${lines === 1 ? "" : "s"} via ${via}`, "info");
+      const lineLabel = `${lines} line${lines === 1 ? "" : "s"}`;
+      if (outcome.kind === "native") {
+        ctx.ui.notify(`Copied ${lineLabel} via ${outcome.command}`, "info");
+      } else {
+        await runtime.requestFullRender?.(ctx);
+        ctx.ui.notify(`Sent ${lineLabel} to terminal clipboard via OSC 52 (best effort)`, "info");
+      }
     } catch (error) {
       notifyUnexpectedError(error, ctx);
     }

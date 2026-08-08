@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { createJiti } from "jiti";
 
@@ -35,6 +38,27 @@ test("extractCodeBlocks preserves whitespace and language", () => {
       lang: "python",
       code: "def hello():\n    return \"world\"",
     },
+  ]);
+});
+
+test("extractCodeBlocks strips structural indentation from nested fences", () => {
+  const markdown = [
+    "  ```ts",
+    "  const top = true;",
+    "    const nested = true;",
+    " x",
+    "",
+    " \t",
+    "     ```",
+    "\t~~~sh",
+    "\techo tab",
+    "  echo spaces",
+    "~~~",
+  ].join("\n");
+
+  assert.deepEqual(extension.extractCodeBlocks(markdown), [
+    { index: 1, lang: "ts", code: "const top = true;\n  const nested = true;\nx\n\n \t" },
+    { index: 2, lang: "sh", code: "echo tab\n echo spaces" },
   ]);
 });
 
@@ -213,6 +237,175 @@ test("splitEditorCommand preserves quoted editor commands", () => {
   assert.deepEqual(extension.splitEditorCommand('"C:\\Program Files\\Neovim\\bin\\nvim.exe"'), [
     "C:\\Program Files\\Neovim\\bin\\nvim.exe",
   ]);
+});
+
+test("buildEditorSpawn uses direct argv and only wraps Windows command shims", () => {
+  assert.deepEqual(
+    extension.buildEditorSpawn('nvim --cmd "set background=dark"', "/tmp/code & notes.txt", "linux"),
+    { command: "nvim", args: ["--cmd", "set background=dark", "/tmp/code & notes.txt"] },
+  );
+  assert.deepEqual(
+    extension.buildEditorSpawn(
+      '"C:\\Tools\\Code.cmd" --wait',
+      "C:\\Temp\\code & notes.txt",
+      "win32",
+      "C:\\Windows\\System32\\cmd.exe",
+    ),
+    {
+      command: "C:\\Windows\\System32\\cmd.exe",
+      args: ["/d", "/s", "/c", "C:\\Tools\\Code.cmd", "--wait", "C:\\Temp\\code & notes.txt"],
+    },
+  );
+  assert.deepEqual(
+    extension.buildEditorSpawn('"C:\\Tools\\edit.BAT"', "C:\\Temp\\code.txt", "win32"),
+    { command: "cmd.exe", args: ["/d", "/s", "/c", "C:\\Tools\\edit.BAT", "C:\\Temp\\code.txt"] },
+  );
+  assert.deepEqual(
+    extension.buildEditorSpawn('"C:\\Tools\\edit.exe"', "C:\\Temp\\code.txt", "win32"),
+    { command: "C:\\Tools\\edit.exe", args: ["C:\\Temp\\code.txt"] },
+  );
+});
+
+test("picker Ctrl+C cancels both normal and search modes", () => {
+  for (const enterSearch of [false, true]) {
+    const results = [];
+    const picker = new extension.CodeBlockPickerComponent(
+      [{ ordinal: 1, blocks: [{ index: 1, lang: "js", code: "one" }, { index: 2, lang: "js", code: "two" }] }],
+      {},
+      {},
+      { requestRender() {} },
+      "copy",
+      (result) => results.push(result),
+    );
+    if (enterSearch) picker.handleInput("/");
+    picker.handleInput("\x03");
+    assert.deepEqual(results, [undefined]);
+  }
+});
+
+test("external editor uses private storage, edits, and cleans up without following a predictable symlink", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-copy-code-test-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const victim = path.join(root, "victim.txt");
+  const predictable = path.join(root, "pi-copy-code.txt");
+  const editorScript = path.join(root, "editor.mjs");
+  fs.writeFileSync(victim, "do not overwrite");
+  fs.symlinkSync(victim, predictable);
+  fs.writeFileSync(editorScript, "import fs from 'node:fs'; fs.appendFileSync(process.argv.at(-1), '\\nedited\\n');");
+  const tuiCalls = [];
+  const results = [];
+  const component = new extension.ExternalEditorComponent(
+    "original",
+    {
+      stop() { tuiCalls.push("stop"); },
+      start() { tuiCalls.push("start"); },
+      requestRender(full) { tuiCalls.push(["render", full]); },
+    },
+    (result) => results.push(result),
+    { editorCommand: `"${process.execPath}" "${editorScript}"`, tempRoot: root },
+  );
+
+  component.render(80);
+  await waitUntil(() => results.length === 1);
+
+  assert.deepEqual(results, [{ code: "original\nedited" }]);
+  assert.deepEqual(tuiCalls, ["stop", "start", ["render", true]]);
+  assert.equal(fs.readFileSync(victim, "utf8"), "do not overwrite");
+  assert.deepEqual(fs.readdirSync(root).sort(), ["editor.mjs", "pi-copy-code.txt", "victim.txt"]);
+});
+
+test("external editor spawn failure completes once, restores the TUI, and cleans up", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-copy-code-test-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const tuiCalls = [];
+  const results = [];
+  const component = new extension.ExternalEditorComponent(
+    "original",
+    {
+      stop() { tuiCalls.push("stop"); },
+      start() { tuiCalls.push("start"); },
+      requestRender(full) { tuiCalls.push(["render", full]); },
+    },
+    (result) => results.push(result),
+    { editorCommand: path.join(root, "missing-editor"), tempRoot: root },
+  );
+
+  component.render(80);
+  await waitUntil(() => results.length === 1);
+
+  assert.equal(results.length, 1);
+  assert.match(results[0].error, /^Unable to start editor:/);
+  assert.deepEqual(tuiCalls, ["stop", "start", ["render", true]]);
+  assert.deepEqual(fs.readdirSync(root), []);
+});
+
+test("external editor setup failure completes once without restarting the TUI", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-copy-code-test-"));
+  fs.rmSync(root, { recursive: true });
+  const tuiCalls = [];
+  const results = [];
+  const component = new extension.ExternalEditorComponent(
+    "original",
+    {
+      stop() { tuiCalls.push("stop"); },
+      start() { tuiCalls.push("start"); },
+      requestRender(full) { tuiCalls.push(["render", full]); },
+    },
+    (result) => results.push(result),
+    { editorCommand: "nvim", tempRoot: root },
+  );
+
+  component.render(80);
+  component.render(80);
+  await waitUntil(() => results.length === 1);
+
+  assert.equal(results.length, 1);
+  assert.match(results[0].error, /^Unable to prepare editor file:/);
+  assert.deepEqual(tuiCalls, []);
+});
+
+test("external editor Ctrl+C cancels exactly once before process handoff", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-copy-code-test-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const results = [];
+  const component = new extension.ExternalEditorComponent(
+    "original",
+    { stop() {}, start() {}, requestRender() {} },
+    (result) => results.push(result),
+    { editorCommand: "nvim", tempRoot: root },
+  );
+
+  component.render(80);
+  component.handleInput("\x03");
+  component.handleInput("\x03");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.deepEqual(results, [undefined]);
+  assert.deepEqual(fs.readdirSync(root), []);
+});
+
+test("native and OSC 52 clipboard outcomes have accurate messages and rendering", async () => {
+  const native = registerForClipboardTests({ nativeCommand: "pbcopy" });
+  await native.commands[0].options.handler("", createClipboardContext(native));
+  assert.deepEqual(native.notifications, [{ message: "Copied 1 line via pbcopy", type: "info" }]);
+
+  const osc52 = registerForClipboardTests({ nativeCommand: null, isTTY: true });
+  await osc52.commands[0].options.handler("", createClipboardContext(osc52));
+  assert.deepEqual(osc52.notifications, [
+    { message: "Sent 1 line to terminal clipboard via OSC 52 (best effort)", type: "info" },
+  ]);
+  assert.deepEqual(osc52.renderCalls, [true]);
+  assert.match(osc52.writes.join(""), /^\x1b\]52;c;/);
+});
+
+test("clipboard fallback reports terminal unavailable without a TTY", async () => {
+  const harness = registerForClipboardTests({ nativeCommand: null, isTTY: false });
+  await harness.commands[0].options.handler("", createClipboardContext(harness));
+  assert.deepEqual(harness.notifications, [
+    { message: "Copy failed: Clipboard unavailable: no native command found and terminal clipboard is not available", type: "error" },
+  ]);
+  assert.deepEqual(harness.renderCalls, []);
+  assert.deepEqual(harness.writes, []);
 });
 
 test("extension registers /copy-code with native and remapped shortcuts", () => {
@@ -515,6 +708,31 @@ test("stale session completion cannot clear the active session guard", async () 
   await waitForMicrotasks();
 });
 
+function registerForClipboardTests({ nativeCommand, isTTY = false }) {
+  const commands = [];
+  const harness = { commands, notifications: [], renderCalls: [], writes: [] };
+  extension.default(
+    {
+      on() {},
+      registerCommand(name, options) { commands.push({ name, options }); },
+      registerShortcut() {},
+    },
+    {
+      copyNative: () => nativeCommand,
+      stdout: { isTTY, write(data) { harness.writes.push(data); return true; } },
+      requestFullRender: async () => harness.renderCalls.push(true),
+    },
+  );
+  return harness;
+}
+
+function createClipboardContext(harness) {
+  return {
+    ui: { notify(message, type) { harness.notifications.push({ message, type }); } },
+    sessionManager: { getEntries: () => [assistantEntry("```js\none\n```")] },
+  };
+}
+
 function registerForTerminalInputTests() {
   const handlers = new Map();
   const listeners = [];
@@ -573,4 +791,12 @@ function createTerminalInputContext({
 
 async function waitForMicrotasks() {
   await new Promise((resolve) => setImmediate(resolve));
+}
+
+async function waitUntil(predicate, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("timed out waiting for condition");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
