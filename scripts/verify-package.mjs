@@ -1,13 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-const expectedFiles = ["LICENSE", "README.md", "extensions/copy-code/index.ts", "package.json"];
-if (packageJson.files.includes("CHANGELOG.md") && existsSync(new URL("../CHANGELOG.md", import.meta.url))) {
-  expectedFiles.splice(1, 0, "CHANGELOG.md");
-}
+const expectedFiles = [...packageJson.files, "package.json"].sort();
 
 assert.equal(lockfile.name, packageJson.name, "package-lock.json name must match package.json");
 assert.equal(lockfile.version, packageJson.version, "package-lock.json version must match package.json");

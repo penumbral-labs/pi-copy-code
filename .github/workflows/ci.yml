@@ -9,8 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  check:
-    name: check
+  node-check:
+    name: Node ${{ matrix.node-version }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -26,6 +26,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+
+  check:
+    name: check
+    needs: node-check
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all Node checks to pass
+        env:
+          NODE_CHECK_RESULT: ${{ needs.node-check.result }}
+        run: test "$NODE_CHECK_RESULT" = success
 
   latest-pi:
     name: latest-pi
