@@ -8,6 +8,9 @@ coverage/
 .pi/
 .pi-subagents/
 .impeccable/
+.aider*
+.continue/
+.repomap/
 CLAUDE.local.md
 *.tgz
 .claude/*

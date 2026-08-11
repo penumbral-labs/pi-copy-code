@@ -42,6 +42,8 @@ jobs:
           NODE
       - run: npm ci --ignore-scripts
       - run: npm run check
+      - run: npm audit --omit=dev
+      - run: npm run smoke-package
       - name: Exercise npm publish without a registry write
         if: github.event_name == 'workflow_dispatch'
         run: npm publish --dry-run
