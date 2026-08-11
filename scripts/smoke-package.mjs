@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { selectNpmInvocation } from "./npm-invocation.mjs";
+import { assertMinimumNpmVersion, selectNpmInvocation } from "./npm-invocation.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const packageJson = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8"));
@@ -20,8 +20,10 @@ const npmInvocation = selectNpmInvocation({
   nodeExecPath: process.execPath,
   npmRunCommand: "npm run smoke-package",
 });
-const temporaryRoot = mkdtempSync(path.join(tmpdir(), "pi-copy-code-smoke-"));
 const npmArguments = (arguments_) => [...npmInvocation.prefixArguments, ...arguments_];
+const npmVersion = execFileSync(npmInvocation.command, npmArguments(["--version"]), { encoding: "utf8" }).trim();
+assertMinimumNpmVersion(npmVersion, "11.10.0");
+const temporaryRoot = mkdtempSync(path.join(tmpdir(), "pi-copy-code-smoke-"));
 
 try {
   const packOutput = execFileSync(

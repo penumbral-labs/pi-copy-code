@@ -15,7 +15,7 @@ product shape: one command, a compact picker, and no runtime dependencies.
 
 ## Development
 
-- Requires Node.js 22.19.0 or newer.
+- Requires Node.js 22.19.0 or newer and npm 11.10.0 or newer.
 - Install with `npm ci`.
 - Run the full gate with `npm run check`.
 - Add focused Node test-runner coverage in `test/copy-code.test.mjs` for behavior changes.

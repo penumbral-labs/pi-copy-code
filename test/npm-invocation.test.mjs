@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { npmPackFailureMessage, selectNpmInvocation } from "../scripts/npm-invocation.mjs";
+import { assertMinimumNpmVersion, npmPackFailureMessage, selectNpmInvocation } from "../scripts/npm-invocation.mjs";
 
 test("uses npm_execpath through Node when npm supplies it", () => {
   assert.deepEqual(
@@ -40,6 +40,20 @@ test("rejects direct Windows invocation with the documented npm run command", ()
       }),
     /Cannot invoke npm directly on Windows without npm_execpath\. Run `npm run smoke-package` instead\./,
   );
+});
+
+test("accepts npm versions at or above the required minimum", () => {
+  assert.doesNotThrow(() => assertMinimumNpmVersion("11.10.0", "11.10.0"));
+  assert.doesNotThrow(() => assertMinimumNpmVersion("11.17.0", "11.10.0"));
+  assert.doesNotThrow(() => assertMinimumNpmVersion("12.0.0-pre.1", "11.10.0"));
+});
+
+test("rejects npm versions below the required minimum", () => {
+  assert.throws(
+    () => assertMinimumNpmVersion("11.9.0", "11.10.0"),
+    /npm 11\.10\.0 or newer is required; found npm 11\.9\.0/,
+  );
+  assert.throws(() => assertMinimumNpmVersion("invalid", "11.10.0"), /Cannot parse npm version: invalid/);
 });
 
 test("reports an npm pack spawn error when stderr is unavailable", () => {

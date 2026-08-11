@@ -10,6 +10,7 @@ assistant responses containing code.
 ## Prerequisites
 
 - Node.js 22.19.0 or newer
+- npm 11.10.0 or newer when developing or releasing from a checkout
 - Pi (tested against Pi 0.84.1; older releases are untested)
 - A native clipboard command (`pbcopy`, `wl-copy`, `xclip`, `xsel`, or `clip.exe`) or a terminal that supports OSC 52
 

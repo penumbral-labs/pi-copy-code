@@ -29,6 +29,8 @@ jobs:
           node-version: "24"
           cache: npm
           registry-url: https://registry.npmjs.org
+      - name: Install npm 11.10.0
+        run: npm install --global npm@11.10.0
       - name: Verify release tag matches package version
         env:
           RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
@@ -68,5 +70,7 @@ jobs:
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
+      - name: Install npm 11.10.0
+        run: npm install --global npm@11.10.0
       - name: Publish package
         run: npm publish --provenance

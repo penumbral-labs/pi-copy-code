@@ -2,7 +2,7 @@
 
 ## Set up a checkout
 
-This project requires Node.js 22.19.0 or newer and npm.
+This project requires Node.js 22.19.0 or newer and npm 11.10.0 or newer.
 
 ```bash
 git clone https://github.com/penumbral-labs/pi-copy-code.git
