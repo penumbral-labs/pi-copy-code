@@ -71,8 +71,9 @@ Before the first real release, repository maintainers must:
 To rehearse a release, run the `Publish to npm` workflow manually. Choose the branch or tag in GitHub's **Run workflow**
 ref selector and enter the expected `vX.Y.Z` tag. The workflow checks out the selected immutable `github.sha`; the `tag`
 input is only an assertion that must equal `v` plus the checked-out `package.json` version. It does not select or
-resolve another ref. Validation runs the contributor gate, production dependency audit, and clean package smoke test.
-Manual dispatch also runs `npm publish --dry-run`; it never writes to the npm registry or runs the publish job.
+resolve another ref. Validation runs the contributor gate, production dependency audit, and clean package smoke test
+against the pinned Pi development baseline. Manual dispatch also runs `npm publish --dry-run`; it never writes to the
+npm registry or runs the publish job.
 
 To publish:
 
