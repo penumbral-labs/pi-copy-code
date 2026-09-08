@@ -85,8 +85,8 @@ try {
       registerShortcut(shortcut) { shortcuts.push(shortcut); },
     });
     assert.deepEqual(commands, ["copy-code"]);
-    assert.deepEqual(shortcuts, ["ctrl+alt+c", "ctrl+super+c", "alt+c"]);
-    console.log("Loaded packed source and verified /copy-code plus three shortcuts");
+    assert.deepEqual(shortcuts, ["ctrl+alt+c", "ctrl+super+c", "alt+c", "ctrl+alt+q", "ctrl+super+q", "alt+q"]);
+    console.log("Loaded packed source and verified /copy-code plus six shortcuts");
   `;
   const harnessPath = path.join(harnessRoot, "smoke.mjs");
   writeFileSync(harnessPath, harness);

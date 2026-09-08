@@ -1,11 +1,11 @@
 # pi-copy-code
 
-A [Pi](https://pi.dev/) package for copying fenced code blocks from assistant messages without terminal-selection
-padding.
+A [Pi](https://pi.dev/) package for copying fenced code blocks and quoted text from assistant messages without
+terminal-selection padding.
 
-`pi-copy-code` adds `/copy-code` and shortcuts for copying the raw text of recent assistant code blocks. A single block
-copies immediately. Multiple blocks or responses open a two-pane picker with a live preview and access to the last ten
-assistant responses containing code.
+`pi-copy-code` adds `/copy-code` and shortcuts for copying the raw text of recent assistant code blocks or Markdown
+blockquotes. A single block copies immediately. Multiple blocks or responses open a two-pane picker with a live preview
+and access to the last ten assistant responses containing matching content.
 
 ## Prerequisites
 
@@ -67,11 +67,30 @@ separately, such as one using the Kitty keyboard protocol. The `alt+c` registrat
 Ctrl+Meta+C chord is remapped and arrives as Alt+C. The tradeoff is that a real Alt+C chord can also invoke the
 extension; use `/copy-code` or another captured chord if that conflicts with your terminal workflow.
 
+Copy quoted text (Markdown blockquotes) instead of code:
+
+```text
+/copy-code quotes
+```
+
+The quote shortcuts mirror the code shortcuts with `q` in place of `c`:
+
+```text
+ctrl+alt+q
+ctrl+super+q
+alt+q
+```
+
+Each quote is a run of consecutive `>` lines with one marker level (and its following space) removed; a blank line
+starts a new quote. Quoted fences stay part of the quote text, and `>` lines inside fenced code are not quotes.
+
 Edit before copying:
 
 ```text
 /copy-code edit
 ```
+
+Arguments combine in any order, so `/copy-code edit quotes` edits a quote before copying it.
 
 Edit mode opens `$VISUAL`, then `$EDITOR`, with the selected text in private temporary storage; set one of these
 variables to your preferred editor command before using edit mode. On Windows, only `.exe` and `.com` targets spawn
@@ -85,11 +104,12 @@ When the picker opens:
 - `←` or `shift+tab` — move toward the current response
 - `enter` — copy, or edit then copy when invoked with `/copy-code edit`
 - `e` — edit the selected block, then copy
+- `t` — toggle between code blocks and quotes (shown only when both are available)
 - `/` — fuzzy-search blocks in the current response
 - `ctrl+c`, `esc`, or `q` — cancel
 
-Response navigation wraps at both ends. The first picker item, `All code blocks`, joins all blocks in the selected
-response with blank lines.
+Response navigation wraps at both ends. The first picker item, `All code blocks` or `All quotes`, joins all blocks in
+the selected response with blank lines.
 
 ## Clipboard behavior
 

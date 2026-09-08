@@ -62,6 +62,59 @@ test("extractCodeBlocks strips structural indentation from sibling backtick and 
   ]);
 });
 
+test("extractBlockQuotes strips one marker level, splits on blank lines, and skips fenced code", () => {
+  const markdown = [
+    "Intro",
+    "> First quote line",
+    ">second line without space",
+    ">",
+    "   > indented marker",
+    "> > nested stays",
+    "",
+    "> Second quote",
+    "plain text ends it",
+    "```sh",
+    "> not a quote, this is a prompt",
+    "```",
+    "> Third quote",
+  ].join("\n");
+
+  assert.deepEqual(extension.extractBlockQuotes(markdown), [
+    { index: 1, lang: "", code: "First quote line\nsecond line without space\n\nindented marker\n> nested stays" },
+    { index: 2, lang: "", code: "Second quote" },
+    { index: 3, lang: "", code: "Third quote" },
+  ]);
+});
+
+test("extractBlockQuotes treats quoted fences as quote text and handles CRLF", () => {
+  const markdown = "> ```js\r\n> const x = 1;\r\n> ```\r\n";
+
+  assert.deepEqual(extension.extractBlockQuotes(markdown), [
+    { index: 1, lang: "", code: "```js\nconst x = 1;\n```" },
+  ]);
+  assert.deepEqual(extension.extractCodeBlocks(markdown), []);
+});
+
+test("extractBlockQuotes returns nothing for prose and code-only markdown", () => {
+  assert.deepEqual(extension.extractBlockQuotes("just prose\n\n```sh\necho hi\n```"), []);
+});
+
+test("createCopyChoices labels quotes and adds an All quotes option", () => {
+  const blocks = [
+    { index: 1, lang: "", code: "one quoted" },
+    { index: 2, lang: "", code: "two quoted\nmore" },
+  ];
+
+  const choices = extension.createCopyChoices(blocks, "quote");
+
+  assert.equal(choices[0].label, "All quotes (2 quotes)");
+  assert.equal(choices[0].aggregate, true);
+  assert.equal(choices[0].code, "one quoted\n\ntwo quoted\nmore");
+  assert.equal(choices[1].label, "1. quote (1 line) one quoted");
+  assert.equal(choices[2].label, "2. quote (2 lines) two quoted");
+  assert.equal(extension.createCopyChoices(blocks.slice(0, 1), "quote")[0].label, "1. quote (1 line) one quoted");
+});
+
 test("createCopyChoices adds an All option for multiple blocks", () => {
   const blocks = [
     { index: 1, lang: "bash", code: "echo one" },
@@ -191,6 +244,20 @@ test("extractMessageBlocks tolerates non-array and empty input", () => {
   assert.deepEqual(extension.extractMessageBlocks([userEntry("hi")]), []);
 });
 
+test("extractMessageBlocks collects quotes independently of code blocks", () => {
+  const entries = [
+    assistantEntry("> only a quote"),
+    assistantEntry("```bash\necho code\n```"),
+    assistantEntry("> both\n\n```bash\necho both\n```"),
+  ];
+
+  const quotes = extension.extractMessageBlocks(entries, 10, "quote");
+  const code = extension.extractMessageBlocks(entries, 10, "code");
+
+  assert.deepEqual(quotes.map((m) => m.blocks[0].code), ["only a quote", "both"]);
+  assert.deepEqual(code.map((m) => m.blocks[0].code), ["echo code", "echo both"]);
+});
+
 test("responseTabLabels label newest as Current, older as Prev N (display order)", () => {
   assert.deepEqual(extension.responseTabLabels(1), ["Current"]);
   assert.deepEqual(extension.responseTabLabels(3), ["Current", "Prev 1", "Prev 2"]);
@@ -301,21 +368,90 @@ test("resolveEditorCommand falls through an empty VISUAL while injected commands
   assert.equal(extension.resolveEditorCommand("", { VISUAL: "vim", EDITOR: "nvim" }), "");
 });
 
+const passthroughTheme = { fg: (_color, text) => text };
+
+function createPicker({ code = [], quote = [], kind = "code", enterAction = "copy", results = [] }) {
+  const picker = new extension.CodeBlockPickerComponent(
+    { code, quote },
+    kind,
+    passthroughTheme,
+    {},
+    { requestRender() {} },
+    enterAction,
+    (result) => results.push(result),
+  );
+  return { picker, results };
+}
+
+const twoCodeBlocks = [
+  { ordinal: 1, blocks: [{ index: 1, lang: "js", code: "one" }, { index: 2, lang: "js", code: "two" }] },
+];
+const twoQuotes = [{ ordinal: 1, blocks: [{ index: 1, lang: "", code: "quote one" }, { index: 2, lang: "", code: "quote two" }] }];
+
 test("picker Ctrl+C cancels both normal and search modes", () => {
   for (const enterSearch of [false, true]) {
-    const results = [];
-    const picker = new extension.CodeBlockPickerComponent(
-      [{ ordinal: 1, blocks: [{ index: 1, lang: "js", code: "one" }, { index: 2, lang: "js", code: "two" }] }],
-      {},
-      {},
-      { requestRender() {} },
-      "copy",
-      (result) => results.push(result),
-    );
+    const { picker, results } = createPicker({ code: twoCodeBlocks });
     if (enterSearch) picker.handleInput("/");
     picker.handleInput("\x03");
     assert.deepEqual(results, [undefined]);
   }
+});
+
+test("picker t toggles between code and quotes and lands on the newest response", () => {
+  const quotes = [
+    { ordinal: 1, blocks: [{ index: 1, lang: "", code: "old quote" }] },
+    { ordinal: 2, blocks: [{ index: 1, lang: "", code: "new quote" }, { index: 2, lang: "", code: "another" }] },
+  ];
+  const { picker, results } = createPicker({ code: twoCodeBlocks, quote: quotes });
+
+  let rendered = picker.render(120).join("\n");
+  assert.match(rendered, /All code blocks/);
+  assert.match(rendered, /t quotes/);
+
+  picker.handleInput("j");
+  picker.handleInput("t");
+  rendered = picker.render(120).join("\n");
+  assert.match(rendered, /All quotes \(2 quotes\)/);
+  assert.match(rendered, /Current/);
+  assert.match(rendered, /t code/);
+  assert.doesNotMatch(rendered, /old quote/);
+
+  picker.handleInput("\r");
+  assert.deepEqual(results, [{ action: "copy", code: "new quote\n\nanother" }]);
+});
+
+test("picker t is a no-op and unadvertised when the other kind is empty", () => {
+  const { picker, results } = createPicker({ quote: twoQuotes, kind: "quote" });
+
+  const before = picker.render(120).join("\n");
+  assert.match(before, /All quotes/);
+  assert.match(before, /j\/k quotes/);
+  assert.doesNotMatch(before, /t code/);
+
+  picker.handleInput("t");
+  assert.equal(picker.render(120).join("\n"), before);
+
+  picker.handleInput("j");
+  picker.handleInput("\r");
+  assert.deepEqual(results, [{ action: "copy", code: "quote one" }]);
+});
+
+test("picker toggle exits search and resets selection", () => {
+  const { picker, results } = createPicker({ code: twoCodeBlocks, quote: twoQuotes });
+
+  picker.handleInput("/");
+  picker.handleInput("t");
+  picker.handleInput("w");
+  picker.handleInput("o");
+  // Still searching code: "two" matches the second block only.
+  picker.handleInput("\r");
+  assert.deepEqual(results, [{ action: "copy", code: "two" }]);
+
+  const second = createPicker({ code: twoCodeBlocks, quote: twoQuotes });
+  second.picker.handleInput("j");
+  second.picker.handleInput("t");
+  second.picker.handleInput("\r");
+  assert.deepEqual(second.results, [{ action: "copy", code: "quote one\n\nquote two" }]);
 });
 
 test("external editor uses private storage, edits, and cleans up without following a predictable symlink", async (t) => {
@@ -639,7 +775,7 @@ test("extension registers /copy-code with native and remapped shortcuts", () => 
   assert.equal(registered.commands[0].name, "copy-code");
   assert.deepEqual(
     registered.shortcuts.map(({ shortcut }) => shortcut),
-    ["ctrl+alt+c", "ctrl+super+c", "alt+c"],
+    ["ctrl+alt+c", "ctrl+super+c", "alt+c", "ctrl+alt+q", "ctrl+super+q", "alt+q"],
   );
   assert.equal(typeof registered.handlers.get("session_start"), "function");
   assert.equal(typeof registered.handlers.get("session_shutdown"), "function");
@@ -655,10 +791,13 @@ test("session_start registers a terminal listener for copy-code shortcuts", () =
   assert.equal(cleanupCalls.length, 0);
 });
 
-for (const [shortcut, input] of [
-  ["ctrl+alt+c", "\x1b\x03"],
-  ["ctrl+super+c", "\x1b[99;13u"],
-  ["physical Ctrl+Meta+C with Ctrl/Command remapped", "\x1bc"],
+for (const [shortcut, input, noun] of [
+  ["ctrl+alt+c", "\x1b\x03", "code blocks"],
+  ["ctrl+super+c", "\x1b[99;13u", "code blocks"],
+  ["physical Ctrl+Meta+C with Ctrl/Command remapped", "\x1bc", "code blocks"],
+  ["ctrl+alt+q", "\x1b\x11", "quoted text"],
+  ["ctrl+super+q", "\x1b[113;13u", "quoted text"],
+  ["physical Ctrl+Meta+Q with Ctrl/Command remapped", "\x1bq", "quoted text"],
 ]) {
   test(`terminal listener consumes ${shortcut} and runs copy-code once`, () => {
     const { handlers, listeners, cleanupCalls } = registerForTerminalInputTests();
@@ -669,9 +808,19 @@ for (const [shortcut, input] of [
     const result = listeners[0](input);
 
     assert.deepEqual(result, { consume: true });
-    assert.deepEqual(notifications, [{ message: "No code blocks found in recent assistant messages", type: "warning" }]);
+    assert.deepEqual(notifications, [{ message: `No ${noun} found in recent assistant messages`, type: "warning" }]);
   });
 }
+
+test("registered quote shortcuts run copy-code in quote mode", async () => {
+  const { shortcuts } = registerForTerminalInputTests();
+  const notifications = [];
+  const ctx = createTerminalInputContext({ listeners: [], cleanupCalls: [], notifications, markdown: "```js\none\n```" });
+
+  await shortcuts.find(({ shortcut }) => shortcut === "ctrl+alt+q").options.handler(ctx);
+
+  assert.deepEqual(notifications, [{ message: "No quoted text found in recent assistant messages", type: "warning" }]);
+});
 
 test("terminal listener consumes matching presses while copy-code is in flight without starting another run", async () => {
   const { handlers, listeners, cleanupCalls } = registerForTerminalInputTests();
@@ -804,15 +953,12 @@ test("terminal listener preserves release and repeat behavior for both shortcuts
   });
 
   handlers.get("session_start")({}, ctx);
-  const altRepeat = listeners[0]("\x1b[99;7:2u");
-  const altRelease = listeners[0]("\x1b[99;7:3u");
-  const superRepeat = listeners[0]("\x1b[99;13:2u");
-  const superRelease = listeners[0]("\x1b[99;13:3u");
-
-  assert.deepEqual(altRepeat, { consume: true });
-  assert.deepEqual(altRelease, { consume: true });
-  assert.deepEqual(superRepeat, { consume: true });
-  assert.deepEqual(superRelease, { consume: true });
+  for (const codepoint of [99, 113]) {
+    for (const modifier of [7, 13]) {
+      assert.deepEqual(listeners[0](`\x1b[${codepoint};${modifier}:2u`), { consume: true });
+      assert.deepEqual(listeners[0](`\x1b[${codepoint};${modifier}:3u`), { consume: true });
+    }
+  }
   assert.deepEqual(notifications, []);
 });
 
@@ -942,12 +1088,56 @@ function registerForClipboardTests({ nativeCommand, isTTY = false, useProduction
   return harness;
 }
 
-function createClipboardContext(harness) {
+function createClipboardContext(harness, markdown = "```js\none\n```") {
   return {
     ui: { notify(message, type) { harness.notifications.push({ message, type }); } },
-    sessionManager: { getEntries: () => [assistantEntry("```js\none\n```")] },
+    sessionManager: { getEntries: () => [assistantEntry(markdown)] },
   };
 }
+
+test("/copy-code quotes copies a lone quote immediately and ignores code blocks", async () => {
+  const markdown = "> the quoted line\n> continues\n\n```js\ncode\n```";
+
+  const quotes = registerForClipboardTests({ nativeCommand: "pbcopy" });
+  await quotes.commands[0].options.handler("quotes", createClipboardContext(quotes, markdown));
+  assert.deepEqual(quotes.notifications, [{ message: "Copied 2 lines via pbcopy", type: "info" }]);
+
+  const code = registerForClipboardTests({ nativeCommand: "pbcopy" });
+  await code.commands[0].options.handler("", createClipboardContext(code, markdown));
+  assert.deepEqual(code.notifications, [{ message: "Copied 1 line via pbcopy", type: "info" }]);
+});
+
+test("/copy-code reports missing quotes separately from missing code and rejects unknown arguments", async () => {
+  const harness = registerForClipboardTests({ nativeCommand: "pbcopy" });
+  const ctx = createClipboardContext(harness, "```js\none\n```");
+
+  await harness.commands[0].options.handler("quotes", ctx);
+  await harness.commands[0].options.handler("blocks", ctx);
+  await harness.commands[0].options.handler("edit quotes", createClipboardContext(harness, "just prose"));
+
+  assert.deepEqual(harness.notifications, [
+    { message: "No quoted text found in recent assistant messages", type: "warning" },
+    { message: "Usage: /copy-code [edit] [quotes]", type: "warning" },
+    { message: "No quoted text found in recent assistant messages", type: "warning" },
+  ]);
+});
+
+test("/copy-code quotes opens the picker in quote mode with code reachable by toggle", async () => {
+  const harness = registerForClipboardTests({ nativeCommand: "pbcopy" });
+  const ctx = createClipboardContext(harness, "> alpha\n\n> beta\n\n```js\ncode\n```");
+  ctx.ui.custom = (factory) =>
+    new Promise((resolve) => {
+      const picker = factory({ requestRender() {} }, passthroughTheme, {}, resolve);
+      const rendered = picker.render(120).join("\n");
+      assert.match(rendered, /All quotes \(2 quotes\)/);
+      assert.match(rendered, /t code/);
+      picker.handleInput("t");
+      picker.handleInput("\r");
+    });
+
+  await harness.commands[0].options.handler("quotes", ctx);
+  assert.deepEqual(harness.notifications, [{ message: "Copied 1 line via pbcopy", type: "info" }]);
+});
 
 function registerForTerminalInputTests() {
   const handlers = new Map();

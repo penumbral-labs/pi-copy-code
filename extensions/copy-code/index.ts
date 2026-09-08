@@ -6,7 +6,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { isKeyRelease, isKeyRepeat, Markdown, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { MarkdownTheme, TUI } from "@earendil-works/pi-tui";
+import type { KeyId, MarkdownTheme, TUI } from "@earendil-works/pi-tui";
 import { Buffer } from "node:buffer";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
@@ -14,6 +14,10 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 type AnyContext = ExtensionCommandContext | ExtensionContext;
+
+// What the picker extracts from assistant Markdown: fenced code blocks or
+// blockquotes (`> ...` lines with the marker stripped).
+export type BlockKind = "code" | "quote";
 
 export type CodeBlock = {
   index: number;
@@ -25,6 +29,8 @@ export type CopyChoice = {
   label: string;
   code: string;
   lang: string;
+  // The synthetic "All ..." entry that joins every block in a response.
+  aggregate?: boolean;
 };
 
 export type MessageBlocks = {
@@ -33,6 +39,8 @@ export type MessageBlocks = {
   ordinal: number;
   blocks: CodeBlock[];
 };
+
+export type MessagesByKind = Record<BlockKind, MessageBlocks[]>;
 
 // Cap on how many prior assistant messages (that contain code) the picker will
 // surface. Bounds in-memory work; nothing here is ever sent to the model.
@@ -47,15 +55,29 @@ type PickerResult = {
 
 type TerminalInputResult = { consume?: boolean; data?: string } | undefined;
 
-const COPY_CODE_SHORTCUTS = ["ctrl+alt+c", "ctrl+super+c", "alt+c"] as const;
+// Same chord shape for both kinds: C copies code, Q copies quotes. A shift
+// modifier on the C chord is not usable here because legacy terminals encode
+// Ctrl+Alt+C identically with or without shift.
+const COPY_SHORTCUTS: Record<BlockKind, readonly KeyId[]> = {
+  code: ["ctrl+alt+c", "ctrl+super+c", "alt+c"],
+  quote: ["ctrl+alt+q", "ctrl+super+q", "alt+q"],
+};
 
-export function handleCopyCodeTerminalInput(data: string, runCopyCode: () => void): TerminalInputResult {
-  if (!COPY_CODE_SHORTCUTS.some((shortcut) => matchesKey(data, shortcut))) {
+const BLOCK_KINDS: readonly BlockKind[] = ["code", "quote"];
+
+export function handleCopyCodeTerminalInput(
+  data: string,
+  runCopyCode: (kind: BlockKind) => void,
+): TerminalInputResult {
+  const kind = BLOCK_KINDS.find((candidate) =>
+    COPY_SHORTCUTS[candidate].some((shortcut) => matchesKey(data, shortcut)),
+  );
+  if (!kind) {
     return undefined;
   }
 
   if (!isKeyRelease(data) && !isKeyRepeat(data)) {
-    runCopyCode();
+    runCopyCode(kind);
   }
 
   return { consume: true };
@@ -83,10 +105,16 @@ function assistantMessageText(entry: any): string {
 }
 
 // Pure helper: given raw session entries (chronological, oldest first), return
-// the last `cap` assistant messages that contain code blocks. Messages without
-// code blocks are skipped entirely. Ordinals are assigned chronologically after
-// the cap is applied, so the newest surfaced message is `result.at(-1)`.
-export function extractMessageBlocks(entries: any[], cap = DEFAULT_MESSAGE_CAP): MessageBlocks[] {
+// the last `cap` assistant messages that contain blocks of `kind`. Messages
+// without such blocks are skipped entirely. Ordinals are assigned
+// chronologically after the cap is applied, so the newest surfaced message is
+// `result.at(-1)`.
+export function extractMessageBlocks(
+  entries: any[],
+  cap = DEFAULT_MESSAGE_CAP,
+  kind: BlockKind = "code",
+): MessageBlocks[] {
+  const extract = kind === "quote" ? extractBlockQuotes : extractCodeBlocks;
   const collected: CodeBlock[][] = [];
 
   for (const entry of entries) {
@@ -95,7 +123,7 @@ export function extractMessageBlocks(entries: any[], cap = DEFAULT_MESSAGE_CAP):
       continue;
     }
 
-    const blocks = extractCodeBlocks(text);
+    const blocks = extract(text);
     if (blocks.length === 0) {
       continue;
     }
@@ -107,43 +135,50 @@ export function extractMessageBlocks(entries: any[], cap = DEFAULT_MESSAGE_CAP):
   return tail.map((blocks, i) => ({ ordinal: i + 1, blocks }));
 }
 
-function collectAssistantCodeBlocks(ctx: AnyContext, cap = DEFAULT_MESSAGE_CAP): MessageBlocks[] {
-  return extractMessageBlocks(resolveEntries(ctx), cap);
+function collectAssistantBlocks(ctx: AnyContext, cap = DEFAULT_MESSAGE_CAP): MessagesByKind {
+  const entries = resolveEntries(ctx);
+  return {
+    code: extractMessageBlocks(entries, cap, "code"),
+    quote: extractMessageBlocks(entries, cap, "quote"),
+  };
+}
+
+type FenceOpen = { char: "`" | "~"; length: number; indent: string; lang: string };
+
+function matchFenceOpen(line: string): FenceOpen | undefined {
+  const open = line.match(/^[ \t]*(`{3,}|~{3,})([^\r\n]*)$/);
+  if (!open) {
+    return undefined;
+  }
+  return {
+    char: open[1][0] as "`" | "~",
+    length: open[1].length,
+    indent: line.slice(0, line.length - open[1].length - open[2].length),
+    lang: (open[2] || "").trim().split(/\s+/)[0] || "",
+  };
+}
+
+function isFenceClose(line: string, fence: FenceOpen): boolean {
+  return new RegExp(`^[ \\t]*${fence.char}{${fence.length},}[ \\t]*$`).test(line);
 }
 
 export function extractCodeBlocks(markdown: string): CodeBlock[] {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
   const blocks: CodeBlock[] = [];
 
-  let fenceChar: "`" | "~" | undefined;
-  let fenceLength = 0;
-  let fenceIndent = "";
-  let lang = "";
+  let fence: FenceOpen | undefined;
   let buffer: string[] = [];
 
   for (const line of lines) {
-    if (!fenceChar) {
-      const open = line.match(/^[ \t]*(`{3,}|~{3,})([^\r\n]*)$/);
-      if (!open) {
-        continue;
-      }
-
-      fenceChar = open[1][0] as "`" | "~";
-      fenceLength = open[1].length;
-      fenceIndent = line.slice(0, line.length - open[1].length - open[2].length);
-      lang = (open[2] || "").trim().split(/\s+/)[0] || "";
+    if (!fence) {
+      fence = matchFenceOpen(line);
       buffer = [];
       continue;
     }
 
-    const fenceLiteral = fenceChar === "`" ? "`" : "~";
-    const close = new RegExp(`^[ \\t]*${fenceLiteral}{${fenceLength},}[ \\t]*$`);
-    if (close.test(line)) {
-      blocks.push({ index: blocks.length + 1, lang, code: buffer.join("\n") });
-      fenceChar = undefined;
-      fenceLength = 0;
-      fenceIndent = "";
-      lang = "";
+    if (isFenceClose(line, fence)) {
+      blocks.push({ index: blocks.length + 1, lang: fence.lang, code: buffer.join("\n") });
+      fence = undefined;
       buffer = [];
       continue;
     }
@@ -154,13 +189,61 @@ export function extractCodeBlocks(markdown: string): CodeBlock[] {
     }
 
     let remove = 0;
-    while (remove < fenceIndent.length && remove < line.length && /[ \t]/.test(line[remove])) {
+    while (remove < fence.indent.length && remove < line.length && /[ \t]/.test(line[remove])) {
       remove += 1;
     }
     buffer.push(line.slice(remove));
   }
 
   return blocks;
+}
+
+// Extracts CommonMark blockquotes: runs of consecutive `>` lines (up to three
+// columns of indentation) with one marker level and its optional following
+// space removed. A blank or unquoted line ends the quote, so two `>` runs
+// separated by a blank line are two quotes. Nested markers stay in the text.
+// Fenced code is skipped, so a `>` inside a fence is code, not a quote.
+export function extractBlockQuotes(markdown: string): CodeBlock[] {
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const quotes: CodeBlock[] = [];
+
+  let fence: FenceOpen | undefined;
+  let buffer: string[] | undefined;
+
+  const flush = () => {
+    if (buffer) {
+      quotes.push({ index: quotes.length + 1, lang: "", code: buffer.join("\n") });
+      buffer = undefined;
+    }
+  };
+
+  for (const line of lines) {
+    if (fence) {
+      if (isFenceClose(line, fence)) {
+        fence = undefined;
+      }
+      continue;
+    }
+
+    const open = matchFenceOpen(line);
+    if (open) {
+      flush();
+      fence = open;
+      continue;
+    }
+
+    const quoted = line.match(/^ {0,3}>(.*)$/);
+    if (!quoted) {
+      flush();
+      continue;
+    }
+
+    const content = quoted[1];
+    (buffer ??= []).push(content.startsWith(" ") ? content.slice(1) : content);
+  }
+
+  flush();
+  return quotes;
 }
 
 function copyNative(text: string): string | undefined {
@@ -226,11 +309,12 @@ function lineCount(text: string): number {
   return text === "" ? 0 : text.split("\n").length;
 }
 
-function describeBlock(block: CodeBlock): string {
+function describeBlock(block: CodeBlock, kind: BlockKind): string {
   const codeLines = block.code.split("\n");
   const first = codeLines.find((line) => line.trim())?.trim().slice(0, 60) || "(blank)";
   const lines = block.code === "" ? 0 : codeLines.length;
-  return `${block.index}. ${block.lang || "text"} (${lines} line${lines === 1 ? "" : "s"}) ${first}`;
+  const type = kind === "quote" ? "quote" : block.lang || "text";
+  return `${block.index}. ${type} (${lines} line${lines === 1 ? "" : "s"}) ${first}`;
 }
 
 export function wrapIndex(index: number, delta: number, count: number): number {
@@ -331,9 +415,9 @@ export function fuzzyScore(text: string, query: string): number {
 }
 
 // Filters choices by a whitespace-delimited query where every token must match.
-// Empty queries preserve the original order. The aggregate "All code blocks"
-// choice (index 0 with that label) is matched on its label only, so a code
-// search does not always surface it at the top via its concatenated contents.
+// Empty queries preserve the original order. The aggregate "All ..." choice is
+// matched on its label only, so a content search does not always surface it at
+// the top via its concatenated contents.
 export function filterCopyChoices(items: CopyChoice[], query: string): CopyChoice[] {
   const trimmed = query.trim();
   if (!trimmed) {
@@ -344,8 +428,7 @@ export function filterCopyChoices(items: CopyChoice[], query: string): CopyChoic
 
   const scored: { item: CopyChoice; score: number; order: number }[] = [];
   items.forEach((item, order) => {
-    const isAggregate = order === 0 && item.label.startsWith("All code blocks");
-    const haystack = isAggregate ? item.label : `${item.label}\n${item.lang}\n${item.code}`;
+    const haystack = item.aggregate ? item.label : `${item.label}\n${item.lang}\n${item.code}`;
 
     let total = 0;
     let matched = true;
@@ -367,15 +450,15 @@ export function filterCopyChoices(items: CopyChoice[], query: string): CopyChoic
   return scored.map((entry) => entry.item);
 }
 
-export function createCopyChoices(blocks: CodeBlock[]): CopyChoice[] {
+export function createCopyChoices(blocks: CodeBlock[], kind: BlockKind = "code"): CopyChoice[] {
+  const choices = blocks.map((block) => ({ label: describeBlock(block, kind), code: block.code, lang: block.lang }));
   if (blocks.length <= 1) {
-    return blocks.map((block) => ({ label: describeBlock(block), code: block.code, lang: block.lang }));
+    return choices;
   }
 
-  return [
-    { label: `All code blocks (${blocks.length} blocks)`, code: blocks.map((b) => b.code).join("\n\n"), lang: "" },
-    ...blocks.map((block) => ({ label: describeBlock(block), code: block.code, lang: block.lang })),
-  ];
+  const label =
+    kind === "quote" ? `All quotes (${blocks.length} quotes)` : `All code blocks (${blocks.length} blocks)`;
+  return [{ label, code: blocks.map((b) => b.code).join("\n\n"), lang: "", aggregate: true }, ...choices];
 }
 
 function isBackspace(data: string): boolean {
@@ -386,26 +469,39 @@ function isPrintable(data: string): boolean {
   return data.length === 1 && data >= " " && data !== "\x7f";
 }
 
+function otherKind(kind: BlockKind): BlockKind {
+  return kind === "code" ? "quote" : "code";
+}
+
 export class CodeBlockPickerComponent {
   private selected = 0;
   private messageIndex: number;
-  private readonly choicesByMessage: CopyChoice[][];
+  private messages: MessageBlocks[];
+  private readonly choicesByKind: Record<BlockKind, CopyChoice[][]>;
   private readonly maxChoices: number;
   private query = "";
   private searching = false;
 
   constructor(
-    private messages: MessageBlocks[],
+    private messagesByKind: MessagesByKind,
+    private kind: BlockKind,
     private theme: Theme,
     private mdTheme: MarkdownTheme,
     private tui: TUI,
     private enterAction: CopyAction,
     private done: (result: PickerResult) => void,
   ) {
-    this.choicesByMessage = messages.map((message) => createCopyChoices(message.blocks));
-    this.maxChoices = this.choicesByMessage.reduce((max, choices) => Math.max(max, choices.length), 1);
+    this.choicesByKind = {
+      code: messagesByKind.code.map((message) => createCopyChoices(message.blocks, "code")),
+      quote: messagesByKind.quote.map((message) => createCopyChoices(message.blocks, "quote")),
+    };
+    this.maxChoices = [...this.choicesByKind.code, ...this.choicesByKind.quote].reduce(
+      (max, choices) => Math.max(max, choices.length),
+      1,
+    );
+    this.messages = messagesByKind[kind];
     // Start on the newest message, matching the previous "latest message" behavior.
-    this.messageIndex = Math.max(0, messages.length - 1);
+    this.messageIndex = Math.max(0, this.messages.length - 1);
   }
 
   private activeQuery(): string {
@@ -413,7 +509,26 @@ export class CodeBlockPickerComponent {
   }
 
   private currentChoices(): CopyChoice[] {
-    return this.choicesByMessage[this.messageIndex] ?? [];
+    return this.choicesByKind[this.kind][this.messageIndex] ?? [];
+  }
+
+  private canToggleKind(): boolean {
+    return this.messagesByKind[otherKind(this.kind)].length > 0;
+  }
+
+  // Switches between code blocks and quotes, landing on the newest response of
+  // the other kind. No-op when the other kind has nothing to show.
+  private toggleKind(): void {
+    if (!this.canToggleKind()) {
+      return;
+    }
+    this.kind = otherKind(this.kind);
+    this.messages = this.messagesByKind[this.kind];
+    this.messageIndex = Math.max(0, this.messages.length - 1);
+    this.selected = 0;
+    this.searching = false;
+    this.query = "";
+    this.tui.requestRender();
   }
 
   private visibleItems(): CopyChoice[] {
@@ -576,9 +691,11 @@ export class CodeBlockPickerComponent {
 
     const enterLabel = this.enterAction === "edit" ? "enter edit" : "enter copy";
     const msgSegment = this.messages.length > 1 ? "←/→ responses • " : "";
+    const itemNoun = this.kind === "quote" ? "quotes" : "blocks";
+    const toggleSegment = this.canToggleKind() ? `t ${otherKind(this.kind) === "quote" ? "quotes" : "code"} • ` : "";
     const hint = this.searching
       ? ` ↑↓ navigate • ${enterLabel} • ⌫/esc back `
-      : ` ${msgSegment}↑↓/j/k blocks • ${enterLabel} • e edit • / search • esc/q cancel `;
+      : ` ${msgSegment}↑↓/j/k ${itemNoun} • ${enterLabel} • e edit • ${toggleSegment}/ search • esc/q cancel `;
     const hintWidth = visibleWidth(hint);
     const pad = Math.max(0, width - hintWidth);
     lines.push(this.theme.fg("dim", " ".repeat(Math.floor(pad / 2)) + hint));
@@ -630,6 +747,8 @@ export class CodeBlockPickerComponent {
       this.query = "";
       this.selected = 0;
       this.tui.requestRender();
+    } else if (data === "t") {
+      this.toggleKind();
     } else if (matchesKey(data, "left") || matchesKey(data, "shift+tab")) {
       // Left / shift+tab move toward the current (newest) response.
       this.switchMessage(1);
@@ -661,12 +780,15 @@ export class CodeBlockPickerComponent {
 }
 
 async function chooseCopyAction(
-  messages: MessageBlocks[],
+  messagesByKind: MessagesByKind,
+  kind: BlockKind,
   ctx: AnyContext,
   enterAction: CopyAction,
 ): Promise<PickerResult> {
-  // Only shortcut past the picker when there is a single block in a single
-  // message; otherwise the picker is needed to navigate messages or blocks.
+  // Only shortcut past the picker when the requested kind has a single block in
+  // a single message; otherwise the picker is needed to navigate messages or
+  // blocks. The other kind is still reachable through its own entry points.
+  const messages = messagesByKind[kind];
   if (messages.length === 1 && messages[0].blocks.length === 1) {
     return { action: enterAction, code: messages[0].blocks[0].code };
   }
@@ -675,7 +797,7 @@ async function chooseCopyAction(
 
   return await ctx.ui.custom<PickerResult>(
     (tui, theme, _keybindings, done) =>
-      new CodeBlockPickerComponent(messages, theme, mdTheme, tui, enterAction, done),
+      new CodeBlockPickerComponent(messagesByKind, kind, theme, mdTheme, tui, enterAction, done),
     { overlay: true },
   );
 }
@@ -908,6 +1030,10 @@ type ExtensionRuntime = {
   requestFullRender?: (ctx: AnyContext) => void | Promise<void>;
 };
 
+function kindArgs(kind: BlockKind): string {
+  return kind === "quote" ? "quotes" : "";
+}
+
 function requestFullRender(ctx: AnyContext): void {
   try {
     const pending = ctx.ui.custom<void>(
@@ -955,42 +1081,49 @@ export default function copyCodeExtension(
       await ctx.waitForIdle();
     }
 
-    const messages = collectAssistantCodeBlocks(ctx, DEFAULT_MESSAGE_CAP);
-    if (messages.length === 0) {
-      ctx.ui.notify("No code blocks found in recent assistant messages", "warning");
+    let enterAction: CopyAction = "copy";
+    let kind: BlockKind = "code";
+    for (const token of args.trim().toLowerCase().split(/\s+/).filter(Boolean)) {
+      if (token === "edit") {
+        enterAction = "edit";
+      } else if (token === "quotes") {
+        kind = "quote";
+      } else {
+        ctx.ui.notify("Usage: /copy-code [edit] [quotes]", "warning");
+        return;
+      }
+    }
+
+    const messagesByKind = collectAssistantBlocks(ctx, DEFAULT_MESSAGE_CAP);
+    if (messagesByKind[kind].length === 0) {
+      const noun = kind === "quote" ? "quoted text" : "code blocks";
+      ctx.ui.notify(`No ${noun} found in recent assistant messages`, "warning");
       return;
     }
 
-    const arg = args.trim().toLowerCase();
-    let text: string | undefined;
+    const result = await chooseCopyAction(messagesByKind, kind, ctx, enterAction);
+    if (result === undefined) {
+      ctx.ui.notify("Copy cancelled", "info");
+      return;
+    }
 
-    if (!arg || arg === "edit") {
-      const result = await chooseCopyAction(messages, ctx, arg === "edit" ? "edit" : "copy");
-      if (result === undefined) {
+    let text: string;
+    if (result.action === "edit") {
+      const edited = await editCodeBeforeCopy(result.code, ctx);
+      if (edited === undefined) {
         ctx.ui.notify("Copy cancelled", "info");
         return;
       }
-
-      if (result.action === "edit") {
-        const edited = await editCodeBeforeCopy(result.code, ctx);
-        if (edited === undefined) {
-          ctx.ui.notify("Copy cancelled", "info");
-          return;
-        }
-        for (const warning of edited.warnings ?? []) {
-          ctx.ui.notify(`Copy warning: ${warning}`, "warning");
-        }
-        if ("error" in edited) {
-          ctx.ui.notify(`Copy failed: ${edited.error}`, "error");
-          return;
-        }
-        text = edited.code;
-      } else {
-        text = result.code;
+      for (const warning of edited.warnings ?? []) {
+        ctx.ui.notify(`Copy warning: ${warning}`, "warning");
       }
+      if ("error" in edited) {
+        ctx.ui.notify(`Copy failed: ${edited.error}`, "error");
+        return;
+      }
+      text = edited.code;
     } else {
-      ctx.ui.notify("Usage: /copy-code [edit]", "warning");
-      return;
+      text = result.code;
     }
 
     try {
@@ -1031,15 +1164,17 @@ export default function copyCodeExtension(
 
   pi.registerCommand("copy-code", {
     description:
-      "Copy code from recent assistant messages; opens a picker to choose blocks and page across responses",
+      "Copy code blocks or quoted text from recent assistant messages; opens a picker to choose blocks and page across responses",
     handler: runGuarded,
   });
 
-  for (const shortcut of COPY_CODE_SHORTCUTS) {
-    pi.registerShortcut(shortcut, {
-      description: "Copy code from recent assistant messages",
-      handler: (ctx) => runGuarded("", ctx),
-    });
+  for (const kind of BLOCK_KINDS) {
+    for (const shortcut of COPY_SHORTCUTS[kind]) {
+      pi.registerShortcut(shortcut, {
+        description: `Copy ${kind === "quote" ? "quoted text" : "code"} from recent assistant messages`,
+        handler: (ctx) => runGuarded(kindArgs(kind), ctx),
+      });
+    }
   }
 
   pi.on("session_start", (_event, ctx) => {
@@ -1052,8 +1187,8 @@ export default function copyCodeExtension(
     }
 
     unsubscribeTerminalInput = ctx.ui.onTerminalInput((data) =>
-      handleCopyCodeTerminalInput(data, () => {
-        void runGuarded("", ctx);
+      handleCopyCodeTerminalInput(data, (kind) => {
+        void runGuarded(kindArgs(kind), ctx);
       }),
     );
   });
