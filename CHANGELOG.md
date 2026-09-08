@@ -3,7 +3,7 @@
 All notable changes to this project are documented in this file. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.4.0] - 2026-09-08
 
 ### Added
 
@@ -58,7 +58,7 @@ All notable changes to this project are documented in this file. The format is b
 
 - Removed the experimental render monkey patch before the initial release.
 
-[Unreleased]: https://github.com/penumbral-labs/pi-copy-code/compare/v0.3.0...HEAD
+[0.4.0]: https://github.com/penumbral-labs/pi-copy-code/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/penumbral-labs/pi-copy-code/compare/45c67ce...v0.3.0
 [0.2.0]: https://github.com/penumbral-labs/pi-copy-code/compare/5c6b4e8...45c67ce
 [0.1.0]: https://github.com/penumbral-labs/pi-copy-code/tree/5c6b4e8
